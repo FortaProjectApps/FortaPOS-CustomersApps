@@ -1,0 +1,3880 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FortaPOS Online Customers</title>
+  <meta name="description" content="Portal Belanja Pelanggan Online FortaPOS terhubung ke Firebase Firestore secara real-time dengan sinkronisasi ongkir dinamis, pelacakan pesanan tunai, dan auto-lock transfer bank.">
+  <meta property="og:title" content="FortaPOS Online Customers">
+  <meta property="og:description" content="Portal Belanja Pelanggan Online FortaPOS terhubung ke Firebase Firestore secara real-time dengan sinkronisasi ongkir dinamis, pelacakan pesanan tunai, dan auto-lock transfer bank.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <!-- Intercept & silence browser extension errors and ensure window.fetch is writable -->
+  <script>
+    (function() {
+      // 1. Immediately install capturing unhandled error handlers
+      // Catches and silences TypeError: Cannot set property fetch of #<Window> which has only a getter
+      // thrown by third-party browser extensions (such as Urban VPN / requests.js or test executors).
+      var isExtensionFetchError = function(msg, source, err) {
+        var m = String(msg || (err && err.message) || '');
+        var s = String(source || (err && err.stack) || '');
+        return (
+          m.indexOf('Cannot set property fetch') !== -1 ||
+          m.indexOf('only a getter') !== -1 ||
+          s.indexOf('chrome-extension://') !== -1 ||
+          s.indexOf('requests.js') !== -1 ||
+          s.indexOf('200.js') !== -1
+        );
+      };
+
+      window.addEventListener('error', function(event) {
+        if (isExtensionFetchError(event.message, event.filename, event.error)) {
+          event.preventDefault();
+          if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+          }
+          return true;
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        if (reason && isExtensionFetchError(reason.message, reason.stack, reason)) {
+          event.preventDefault();
+          if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+          }
+        }
+      }, true);
+
+      var prevOnError = window.onerror;
+      window.onerror = function(msg, url, lineNo, colNo, error) {
+        if (isExtensionFetchError(msg, url, error)) {
+          return true;
+        }
+        if (typeof prevOnError === 'function') {
+          return prevOnError.apply(this, arguments);
+        }
+        return false;
+      };
+
+      // 2. Ensure window.fetch has a setter so extensions assigning `window.fetch = ...` don't throw
+      try {
+        var _fetch = window.fetch;
+        if (typeof _fetch === 'function') {
+          var _currentFetch = _fetch;
+
+          // Try delete to clear getter if configurable
+          try {
+            delete window.fetch;
+          } catch(eDel) {}
+
+          // Define setter and getter on window
+          try {
+            Object.defineProperty(window, 'fetch', {
+              get: function() { return _currentFetch; },
+              set: function(fn) { _currentFetch = fn; },
+              configurable: true,
+              enumerable: true
+            });
+          } catch (eDef1) {
+            try {
+              Object.defineProperty(window, 'fetch', {
+                value: _currentFetch,
+                writable: true,
+                configurable: true,
+                enumerable: true
+              });
+            } catch(eDef2) {}
+          }
+
+          // Also patch prototype chain (WindowProperties, Window.prototype, etc.)
+          var proto = Object.getPrototypeOf(window);
+          while (proto && proto !== Object.prototype) {
+            try {
+              var d = Object.getOwnPropertyDescriptor(proto, 'fetch');
+              if (d && !d.set && d.configurable !== false) {
+                Object.defineProperty(proto, 'fetch', {
+                  get: function() { return _currentFetch; },
+                  set: function(fn) { _currentFetch = fn; },
+                  configurable: true,
+                  enumerable: d.enumerable !== false
+                });
+              }
+            } catch(eProto) {}
+            proto = Object.getPrototypeOf(proto);
+          }
+
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            try {
+              var wpDesc = Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+              if (wpDesc && !wpDesc.set && wpDesc.configurable !== false) {
+                Object.defineProperty(Window.prototype, 'fetch', {
+                  get: function() { return _currentFetch; },
+                  set: function(fn) { _currentFetch = fn; },
+                  configurable: true,
+                  enumerable: wpDesc.enumerable !== false
+                });
+              }
+            } catch(eWp) {}
+          }
+        }
+      } catch(err) {}
+    })();
+  </script>
+
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              DEFAULT: '#4f46e5',
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca'
+            }
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Firebase SDK v8 (Compat) via CDN -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+      color: #1e293b;
+      -webkit-font-smoothing: antialiased;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background-color: #cbd5e1;
+      border-radius: 9999px;
+    }
+    .pulse-danger {
+      animation: dangerPulse 1.5s infinite;
+    }
+    @keyframes dangerPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.02); }
+    }
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #receiptModalContent, #receiptModalContent * {
+        visibility: visible;
+      }
+      #receiptModalContent {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        margin: 0;
+        padding: 10px;
+        font-size: 12pt;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans bg-[#f8f9fa] text-slate-800">
+
+  <!-- TOP APP BAR -->
+  <header class="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <!-- Brand & Store ID Indicator -->
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-9 h-9 rounded-xl bg-[#4f46e5] text-white flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
+          F
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <h1 class="text-sm sm:text-base font-bold text-slate-900 truncate">FortaPOS-Online</h1>
+            <span class="text-[10px] font-semibold text-[#4f46e5] bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5 whitespace-nowrap">CUSTOMERS</span>
+            <span class="text-[10px] font-mono text-slate-400 bg-slate-100/90 border border-slate-200/70 rounded px-1.5 py-0.5 tracking-tight font-medium select-none" title="Versi Rilis">OSV1.0.0.V8</span>
+          </div>
+          <div class="flex items-center gap-1 text-xs text-slate-500 truncate">
+            <i data-lucide="store" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+            <!-- Penyesuaian Header Strip Dinamis (Petugas / Toko) -->
+            <span id="headerLabelStoreOrCashier">Toko:</span>
+            <button onclick="openStoreSwitcherModal()" class="font-bold text-slate-800 hover:text-[#4f46e5] underline decoration-dotted flex items-center gap-1 truncate" title="Klik untuk ganti ID Toko">
+              <span id="headerStoreName">Memuat...</span>
+              <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons: Customer Profile, My Orders, & Cart Trigger -->
+      <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <!-- Customer Button / Profile Trigger -->
+        <button id="btnUserProfile" onclick="openProfileModal()" class="flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 transition-colors" title="Informasi & Alamat Pelanggan">
+          <div class="w-6 h-6 rounded-full bg-indigo-100 text-[#4f46e5] flex items-center justify-center font-bold text-xs">
+            <span id="userAvatarChar">?</span>
+          </div>
+          <span id="userDisplayName" class="max-w-[75px] sm:max-w-[120px] truncate hidden sm:inline">Tamu</span>
+        </button>
+
+        <!-- Pesanan Saya (My Orders) Header Button -->
+        <button id="btnMyOrdersHeader" onclick="toggleCustomerViewTab('orders')" class="flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 transition-colors" title="Lihat Status Pesanan Anda">
+          <i data-lucide="receipt" class="w-4 h-4 text-[#4f46e5]"></i>
+          <span class="hidden sm:inline font-semibold">Pesanan Saya</span>
+          <span id="myOrdersHeaderBadge" class="hidden bg-[#4f46e5] text-white text-[10px] font-bold rounded-full px-1.5 py-0.2">0</span>
+        </button>
+
+        <!-- Cart Button with Counter Badge -->
+        <button id="btnCartHeader" onclick="toggleCartDrawer(true)" class="relative p-2.5 rounded-xl bg-[#4f46e5] hover:bg-[#4338ca] text-white transition-all shadow-sm active:scale-95 flex items-center justify-center" aria-label="Buka Keranjang">
+          <i data-lucide="shopping-bag" class="w-5 h-5"></i>
+          <span id="cartCountBadge" class="absolute -top-1.5 -right-1.5 bg-[#ef4444] text-white text-[11px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white scale-0 transition-transform">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- STORE ANNOUNCEMENT / STATUS BAR WITH DYNAMIC SHIPPING INDICATOR -->
+  <div id="storeBanner" class="bg-indigo-50/80 border-b border-indigo-100 text-xs text-indigo-900 px-4 py-2">
+    <div class="max-w-4xl mx-auto flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+      <div class="flex items-center gap-2 truncate">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+        <span class="truncate font-medium text-xs">
+          Katalog Real-Time Firestore · <span id="bannerShippingStatus" class="font-semibold text-[#4f46e5]">Memeriksa Ongkir...</span>
+        </span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0 text-[11px]">
+        <button onclick="copyStoreUrl()" class="text-[#4f46e5] hover:underline font-semibold flex items-center gap-1">
+          <i data-lucide="share-2" class="w-3 h-3"></i>
+          <span class="hidden sm:inline">Salin Link Toko</span>
+        </button>
+        <span class="text-indigo-300">|</span>
+        <button onclick="openConfigModal()" class="text-[#4f46e5] hover:underline font-semibold flex items-center gap-1">
+          <i data-lucide="database" class="w-3 h-3"></i>
+          <span>Status & Ongkir Kasir</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN VIEW CONTAINER -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-4 sm:py-6">
+
+    <!-- VIEW SWITCHER: KATALOG PRODUK vs PESANAN SAYA -->
+    <div class="flex items-center justify-between border-b border-slate-200 pb-3 mb-5 gap-2">
+      <div class="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+        <button 
+          id="tabBtnCatalog" 
+          onclick="toggleCustomerViewTab('catalog')" 
+          class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-white text-slate-900 shadow-xs cursor-pointer"
+        >
+          <i data-lucide="shopping-bag" class="w-3.5 h-3.5"></i>
+          <span>Katalog Produk</span>
+        </button>
+        
+        <button 
+          id="tabBtnOrders" 
+          onclick="toggleCustomerViewTab('orders')" 
+          class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 cursor-pointer"
+        >
+          <i data-lucide="receipt" class="w-3.5 h-3.5"></i>
+          <span>Pesanan Saya</span>
+          <span id="tabOrdersBadge" class="hidden px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#4f46e5] text-white">0</span>
+        </button>
+      </div>
+
+      <button 
+        id="btnBackToShoppingTop" 
+        onclick="toggleCustomerViewTab('catalog')" 
+        class="hidden text-xs font-semibold text-[#4f46e5] hover:underline flex items-center gap-1 cursor-pointer"
+      >
+        <span>+ Belanja Lagi</span>
+      </button>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 1: KATALOG BELANJA PRODUK                        -->
+    <!-- ======================================================== -->
+    <div id="catalogSection">
+      <!-- SEARCH & CATEGORY BAR -->
+      <div class="mb-5 space-y-3">
+        <!-- Search Input -->
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <i data-lucide="search" class="w-4 h-4"></i>
+          </div>
+          <input 
+            type="text" 
+            id="productSearchInput" 
+            placeholder="Cari nama barang atau produk di toko ini..." 
+            oninput="handleSearchChange(this.value)"
+            class="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl text-sm placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#4f46e5] focus:border-transparent transition-all shadow-2xs"
+          />
+          <button 
+            id="clearSearchBtn" 
+            onclick="clearSearch()" 
+            class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 hidden"
+          >
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Dynamic Category Tabs -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 custom-scroll" id="categoryTabsContainer">
+          <button 
+            onclick="selectCategory('all')" 
+            id="tab-cat-all" 
+            class="category-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-[#4f46e5] text-white shadow-xs"
+          >
+            Semua Kategori
+          </button>
+        </div>
+      </div>
+
+      <!-- PRODUCT CATALOG FEED -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <span>Daftar Produk</span>
+              <span id="productCounter" class="text-xs font-normal text-slate-500">(Memuat...)</span>
+            </h2>
+            <p class="text-[11px] text-slate-400 mt-0.5">Ketuk kotak foto produk untuk langsung menambah ke keranjang belanja</p>
+          </div>
+          <span class="text-[11px] text-slate-400 flex items-center gap-1 shrink-0">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <span>Real-time Sync</span>
+          </span>
+        </div>
+
+        <!-- Product Grid -->
+        <div id="productGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          <!-- Loading State -->
+          <div class="col-span-full py-16 text-center text-slate-400 flex flex-col items-center justify-center">
+            <div class="w-8 h-8 border-3 border-[#4f46e5] border-t-transparent rounded-full animate-spin mb-3"></div>
+            <p class="text-xs font-medium text-slate-600">Menghubungkan ke Cloud Firestore...</p>
+            <p class="text-[11px] text-slate-400 mt-1 font-mono" id="loadingPathLabel">Path: /stores/{storeId}/products</p>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyCatalogState" class="hidden text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
+          <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+            <i data-lucide="package-x" class="w-6 h-6"></i>
+          </div>
+          <h3 class="text-sm font-bold text-slate-800 mb-1">Tidak Ada Produk Ditemukan</h3>
+          <p class="text-xs text-slate-500 max-w-sm mx-auto mb-4" id="emptyCatalogMsg">
+            Katalog pada path Firestore <code>/stores/{storeId}/products</code> masih kosong atau tidak sesuai pencarian.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <button onclick="resetSearchAndCategory()" class="px-4 py-2 text-xs font-semibold text-[#4f46e5] bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer">
+              Lihat Semua Kategori
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 2: PESANAN SAYA (REAL-TIME BY WHATSAPP)          -->
+    <!-- ======================================================== -->
+    <div id="myOrdersSection" class="hidden space-y-4">
+      
+      <!-- Identity, WhatsApp, & Customer Address Banner -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-slate-500">Pelanggan:</span>
+              <span id="ordersCustomerName" class="text-sm font-bold text-slate-900">-</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-600">
+              <i data-lucide="phone" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+              <span class="font-medium">No. WhatsApp:</span>
+              <span id="ordersCustomerPhone" class="font-mono font-bold text-slate-800 select-all">-</span>
+            </div>
+            <!-- Tampilkan informasi alamat rapi tepat di bawah baris No WhatsApp -->
+            <div class="flex items-start gap-2 text-xs text-slate-600 pt-0.5">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 text-[#4f46e5] shrink-0 mt-0.5"></i>
+              <span class="font-medium shrink-0">Alamat:</span>
+              <span id="ordersCustomerAddress" class="text-slate-800 leading-snug break-words">-</span>
+            </div>
+          </div>
+
+          <!-- Quick change / Switch WhatsApp Number -->
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1 sm:w-52">
+              <input 
+                type="tel" 
+                id="inputQueryWhatsapp" 
+                placeholder="Ketik WhatsApp lain..." 
+                class="w-full text-xs py-1.5 px-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden font-mono"
+              />
+              <button onclick="handleManualWhatsAppQuery()" class="absolute inset-y-0 right-0 pr-2 flex items-center text-[#4f46e5] hover:text-[#4338ca] cursor-pointer" title="Cari Pesanan">
+                <i data-lucide="search" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <button onclick="openProfileModal()" class="py-1.5 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors whitespace-nowrap cursor-pointer">
+              Ubah Data
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 flex-wrap gap-2">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Real-time listener aktif pada: <code class="font-mono text-slate-700 font-semibold" id="ordersPathBadge">/stores/{storeId}/online_orders</code></span>
+          </div>
+          <span class="text-slate-400">Otomatis sinkron saat kasir mengupdate pesanan</span>
+        </div>
+      </div>
+
+      <!-- Status Filter Tabs -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scroll" id="ordersFilterTabs">
+        <button onclick="setOrdersFilter('all')" id="btnFilterOrderAll" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-[#4f46e5] text-white shadow-xs cursor-pointer">
+          Semua (<span id="countOrderAll">0</span>)
+        </button>
+        <button onclick="setOrdersFilter('Pending')" id="btnFilterOrderPending" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer">
+          Pending (<span id="countOrderPending">0</span>)
+        </button>
+        <button onclick="setOrdersFilter('process')" id="btnFilterOrderProcess" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer">
+          Diproses (<span id="countOrderProcess">0</span>)
+        </button>
+        <button onclick="setOrdersFilter('verified')" id="btnFilterOrderVerified" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer">
+          Selesai (<span id="countOrderVerified">0</span>)
+        </button>
+        <button onclick="setOrdersFilter('expired')" id="btnFilterOrderExpired" class="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer">
+          Batal / Expired (<span id="countOrderExpired">0</span>)
+        </button>
+      </div>
+
+      <!-- Orders Feed Container -->
+      <div id="ordersContainer" class="space-y-3">
+        <!-- Injected via JavaScript -->
+        <div class="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
+          <i data-lucide="receipt" class="w-12 h-12 mx-auto text-slate-300 mb-2"></i>
+          <h4 class="text-sm font-bold text-slate-800 mb-1">Belum Ada Pesanan</h4>
+          <p class="text-xs text-slate-500 max-w-sm mx-auto mb-4">
+            Pesanan yang Anda buat melalui nomor WhatsApp ini akan otomatis terlacak statusnya secara real-time di sini.
+          </p>
+          <button onclick="toggleCustomerViewTab('catalog')" class="px-4 py-2 bg-[#4f46e5] text-white rounded-xl text-xs font-bold hover:bg-[#4338ca] transition-colors inline-flex items-center gap-1.5 shadow-xs cursor-pointer">
+            <span>Mulai Belanja di Katalog</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- FLOATING BOTTOM BAR FOR MOBILE (Quick Cart Summary) -->
+  <div id="mobileFloatingBar" class="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 shadow-lg z-30 transition-all translate-y-full">
+    <div class="max-w-4xl mx-auto flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <div class="text-[11px] text-slate-500 flex items-center gap-1">
+          <span id="floatingCartItemsCount">0 Barang</span>
+          <span>·</span>
+          <span id="floatingShippingMethodNote">Siap Dipesan</span>
+        </div>
+        <div id="floatingCartTotal" class="text-base font-bold text-slate-900 font-mono tabular-nums">
+          Rp 0
+        </div>
+      </div>
+      <button onclick="toggleCartDrawer(true)" class="px-5 py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer">
+        <span>Buka Keranjang</span>
+        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL / DRAWER: KERANJANG BELANJA & CHECKOUT             -->
+  <!-- ======================================================== -->
+  <div id="cartDrawerBackdrop" onclick="toggleCartDrawer(false)" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 opacity-0 pointer-events-none transition-opacity duration-300"></div>
+  <aside id="cartDrawer" class="fixed top-0 right-0 bottom-0 w-full max-w-md bg-white z-50 shadow-2xl flex flex-col h-full max-h-screen overflow-hidden transform translate-x-full transition-transform duration-300 ease-in-out">
+    
+    <!-- 1. Drawer Header (Fixed at top of drawer) -->
+    <div class="p-3.5 sm:p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/90 shrink-0 z-30">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-indigo-50 text-[#4f46e5] flex items-center justify-center shadow-2xs">
+          <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">Keranjang Belanja</h3>
+          <p id="drawerItemSummary" class="text-[11px] text-slate-500 font-medium">0 produk dipilih</p>
+        </div>
+      </div>
+      <!-- Sisi Kanan Header: Tombol Hapus Seluruh Keranjang & Tombol Close (X) -->
+      <div class="flex items-center gap-1.5">
+        <!-- Tombol Icon Keranjang Disilang Berwarna Merah Kecil (Hapus Seluruh Barang) -->
+        <button 
+          type="button" 
+          id="btnClearCartHeader"
+          onclick="confirmClearCart()" 
+          class="p-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer active:scale-95 flex items-center justify-center"
+          title="Hapus seluruh barang di keranjang"
+          aria-label="Hapus seluruh barang di keranjang"
+        >
+          <div class="relative w-5 h-5 flex items-center justify-center">
+            <!-- Ikon Keranjang dengan Garis Silang Merah -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4.5 h-4.5 text-rose-500">
+              <circle cx="8" cy="21" r="1"/>
+              <circle cx="19" cy="21" r="1"/>
+              <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
+              <line x1="3" y1="3" x2="21" y2="21" stroke="#ef4444" stroke-width="2.5"/>
+            </svg>
+            <!-- Tanda Silang (X) Merah Kecil di Sudut Atas -->
+            <span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold leading-none shadow-xs border border-white">
+              &times;
+            </span>
+          </div>
+        </button>
+
+        <!-- Tombol Close (X) untuk Menutup Jendela -->
+        <button 
+          type="button" 
+          onclick="toggleCartDrawer(false)" 
+          class="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+          aria-label="Tutup Keranjang"
+          title="Tutup Keranjang"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- WRAPPER KONTEN UTAMA: FLEX-1 VERTICAL UNTUK MENJAGA STRUKTUR BEBAS TUMPANG TINDIH -->
+    <div class="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+
+      <!-- ELEMEN PEMBUNGKUS DAFTAR ITEM BARANG DENGAN BATAS TINGGI RESPONSIF -->
+      <div class="shrink-0 flex flex-col max-h-[38vh] sm:max-h-[42vh] md:max-h-[300px] bg-white border-b border-slate-200/90 shadow-2xs z-20">
+        <div class="px-4 py-2 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+          <span class="font-bold text-slate-700 flex items-center gap-1.5">
+            <i data-lucide="package" class="w-3.5 h-3.5 text-[#4f46e5]"></i>
+            <span>Daftar Barang Belanja</span>
+          </span>
+          <span class="text-[10px] text-slate-400 font-medium">Bisa digulir (&uarr;&darr;)</span>
+        </div>
+
+        <div id="cartItemsList" class="flex-1 max-h-[32vh] sm:max-h-[36vh] md:max-h-[250px] overflow-y-auto p-3 sm:p-3.5 space-y-2.5 custom-scroll overscroll-contain">
+          <div class="text-center py-12 text-slate-400">
+            <i data-lucide="shopping-bag" class="w-10 h-10 mx-auto mb-2 text-slate-300"></i>
+            <p class="text-xs font-semibold text-slate-600 mb-0.5">Keranjang Masik Kosong</p>
+            <p class="text-[11px] text-slate-400">Pilih produk dari katalog untuk menambahkannya ke sini.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TATA LETAK MENU PENGATURAN TRANSAKSI: FLEX-1 VERTICAL TERPISAH -->
+      <div id="checkoutOptionsArea" class="flex-1 overflow-y-auto p-3.5 sm:p-4 bg-slate-50/60 space-y-3 custom-scroll overscroll-contain pb-24 sm:pb-8 hidden relative z-10">
+        
+        <!-- Customer Identity & Registered Address Preview Banner -->
+        <div class="bg-indigo-50/70 border border-indigo-100 rounded-xl p-2.5 flex items-start justify-between text-xs shadow-2xs">
+          <div class="truncate mr-2 min-w-0">
+            <div class="flex items-center gap-1">
+              <span class="text-slate-500 text-[11px]">Pemesan:</span>
+              <span id="checkoutCustomerName" class="font-bold text-slate-800 text-xs">Pelanggan</span>
+              <span id="checkoutCustomerPhone" class="text-slate-500 font-mono text-[10px] ml-1">08xxxxxxxxxx</span>
+            </div>
+            <!-- Ringkasan Alamat Terdaftar di Awal -->
+            <div class="mt-1 text-[11px] text-slate-600 flex items-start gap-1">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 text-[#4f46e5] shrink-0 mt-0.5"></i>
+              <div class="min-w-0">
+                <span class="text-[10px] text-slate-400 block font-medium">Alamat Pengiriman Terdaftar:</span>
+                <span id="checkoutCustomerAddress" class="text-slate-800 font-medium leading-tight block truncate">Alamat belum diatur</span>
+              </div>
+            </div>
+          </div>
+          <button type="button" onclick="openProfileModal()" class="text-[#4f46e5] hover:text-[#4338ca] text-[11px] font-bold px-2 py-1 rounded-lg hover:bg-white transition-colors shrink-0 cursor-pointer">Ubah</button>
+        </div>
+
+        <!-- METODE PENGIRIMAN DENGAN SINKRONISASI ONGKIR DINAMIS -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-bold text-slate-700">Metode Pengiriman</label>
+            <span id="labelShippingSyncStatus" class="text-[10px] text-slate-500 font-medium">Sinkron Firestore</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- Tombol Antar -->
+            <button type="button" onclick="selectDeliveryMethod('antar')" id="btnMethodAntar" class="p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer">
+              <div class="flex items-center justify-between gap-1 mb-0.5">
+                <div class="flex items-center gap-1.5 text-xs font-bold text-[#4f46e5]">
+                  <i data-lucide="truck" class="w-3.5 h-3.5 shrink-0"></i>
+                  <span>Belanja Diantar</span>
+                </div>
+                <span id="antarOngkirBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-[#4f46e5] shrink-0">
+                  Rp 10.000
+                </span>
+              </div>
+              <p id="antarMethodDesc" class="text-[10px] text-slate-500 leading-tight">Kurir antar ke alamat Anda</p>
+            </button>
+
+            <!-- Tombol Ambil di Toko -->
+            <button type="button" onclick="selectDeliveryMethod('ambil')" id="btnMethodAmbil" class="p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer">
+              <div class="flex items-center justify-between gap-1 mb-0.5">
+                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <i data-lucide="store" class="w-3.5 h-3.5 shrink-0"></i>
+                  <span>Ambil di Toko</span>
+                </div>
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 shrink-0">
+                  Gratis
+                </span>
+              </div>
+              <p class="text-[10px] text-slate-500 leading-tight">Ambil mandiri ke gerai toko</p>
+            </button>
+          </div>
+        </div>
+
+        <!-- METODE PEMBAYARAN DENGAN AUTO-LOCK FITUR TRANSFER BANK DARI KASIR -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-bold text-slate-700">Metode Pembayaran</label>
+            <span id="bankSyncStatusBadge" class="text-[10px] text-slate-500 font-medium">Pilih Opsi</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- Pembayaran Cash / Tunai -->
+            <button type="button" onclick="selectPaymentMethod('cash')" id="btnPayCash" class="p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer">
+              <div class="flex items-center gap-1.5 text-xs font-bold text-[#4f46e5] mb-0.5">
+                <i data-lucide="banknote" class="w-3.5 h-3.5 shrink-0"></i>
+                <span>Cash / Tunai</span>
+              </div>
+              <p class="text-[10px] text-slate-500 leading-tight">Bayar tunai di tempat</p>
+            </button>
+
+            <!-- Pembayaran Transfer Bank (Bisa Terkunci/Disabled Otomatis oleh Kasir jika bankStatus=false/OFF) -->
+            <button type="button" onclick="selectPaymentMethod('transfer')" id="btnPayTransfer" class="p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer relative overflow-hidden">
+              <div class="flex items-center justify-between gap-1 mb-0.5">
+                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <i data-lucide="credit-card" class="w-3.5 h-3.5 shrink-0"></i>
+                  <span>Transfer Bank</span>
+                </div>
+                <span id="bankDisabledBadge" class="hidden text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 border border-rose-200 shrink-0">
+                  Terkunci
+                </span>
+              </div>
+              <p id="bankDescText" class="text-[10px] text-slate-500 leading-tight">Upload bukti transfer</p>
+            </button>
+          </div>
+        </div>
+
+        <!-- Catatan Pesanan -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Catatan Tambahan (Opsional)</label>
+          <input 
+            type="text" 
+            id="inputOrderNotes" 
+            placeholder="Contoh: Titip di pos satpam / bungkus rapat..." 
+            class="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden transition-all shadow-2xs"
+          />
+        </div>
+
+        <!-- RINGKASAN BIAYA & TOTAL BILL -->
+        <div class="pt-2 border-t border-slate-200 space-y-1.5 text-xs bg-white/70 p-3 rounded-xl border border-slate-200/60 shadow-2xs">
+          <div class="flex justify-between text-slate-500">
+            <span>Subtotal Produk</span>
+            <span id="summarySubtotal" class="font-mono tabular-nums text-slate-800 font-semibold">Rp 0</span>
+          </div>
+          <div class="flex justify-between items-center text-slate-500" id="summaryOngkirRow">
+            <div class="flex items-center gap-1">
+              <span>Biaya Ongkos Kirim</span>
+              <span id="summaryOngkirTag" class="text-[10px] font-semibold text-[#4f46e5]"></span>
+            </div>
+            <span id="summaryOngkir" class="font-mono tabular-nums text-slate-800 font-semibold">Rp 10.000</span>
+          </div>
+          <div class="flex justify-between text-sm font-bold text-slate-900 pt-2 border-t border-slate-200">
+            <span>Total Pembayaran</span>
+            <span id="summaryGrandTotal" class="text-[#4f46e5] font-mono tabular-nums text-base">Rp 0</span>
+          </div>
+        </div>
+
+        <!-- Tombol Checkout Utama -->
+        <div class="pt-1.5 pb-2">
+          <button 
+            id="btnSubmitCheckout" 
+            onclick="handleCheckoutSubmit()" 
+            class="w-full py-3.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md hover:shadow-lg active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <span>Proses Pesanan Sekarang</span>
+            <i data-lucide="check" class="w-4 h-4"></i>
+          </button>
+          <p class="text-[10px] text-slate-400 text-center mt-2 leading-tight">
+            Pesanan disimpan ke <code class="font-mono">/stores/{storeId}/online_orders</code> dengan status awal "Pending".
+          </p>
+          <div class="text-center pt-2">
+            <span class="text-[10px] font-mono text-slate-400">FortaPOS-Online · OSV1.0.0.V8</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: REGISTRASI / MASUK & ALAMAT PELANGGAN             -->
+  <!-- ======================================================== -->
+  <div id="registrationModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 transform scale-95 transition-transform duration-300">
+      <div class="text-center mb-4">
+        <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-[#4f46e5] flex items-center justify-center mx-auto mb-3 shadow-inner">
+          <i data-lucide="user-check" class="w-6 h-6"></i>
+        </div>
+        <h3 id="regModalTitle" class="text-base font-bold text-slate-900">Selamat Datang di Toko</h3>
+        <p class="text-xs text-slate-500 mt-1">Lengkapi data diri dan alamat pengiriman Anda untuk memulai transaksi dan melacak pesanan.</p>
+      </div>
+
+      <form onsubmit="handleRegistrationSubmit(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Nama Lengkap <span class="text-red-500">*</span></label>
+          <input 
+            type="text" 
+            id="regCustomerName" 
+            required 
+            placeholder="Contoh: Budi Santoso" 
+            class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Nomor WhatsApp Aktif <span class="text-red-500">*</span></label>
+          <input 
+            type="tel" 
+            id="regCustomerPhone" 
+            required 
+            placeholder="Contoh: 081234567890" 
+            class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden font-mono"
+          />
+          <span class="text-[10px] text-slate-400 mt-0.5 block">Digunakan kasir untuk konfirmasi order & update status.</span>
+        </div>
+
+        <!-- Kolom input wajib baru: Alamat Lengkap Pengiriman -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Alamat Lengkap Pengiriman <span class="text-red-500">*</span></label>
+          <textarea 
+            id="regCustomerAddress" 
+            required 
+            rows="2" 
+            placeholder="Contoh: Jl. Merpati No. 12 RT 03/RW 04, Kel. Sukamaju, Patokan samping minimarket..." 
+            class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden"
+          ></textarea>
+          <span class="text-[10px] text-slate-400 mt-0.5 block">Otomatis tersimpan sebagai alamat antar pesanan Anda.</span>
+        </div>
+
+        <div class="pt-2 flex flex-col gap-1.5">
+          <button 
+            type="submit" 
+            id="btnRegSubmit"
+            class="w-full py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <span id="btnRegSubmitText">Mulai Berbelanja</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+          
+          <button 
+            type="button" 
+            id="btnRegClose"
+            onclick="showRegistrationModal(false)" 
+            class="hidden w-full py-1.5 text-xs text-slate-500 hover:text-slate-700 font-medium transition-colors cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: KONFIRMASI TRANSFER & UPLOAD BUKTI (BASE64)       -->
+  <!-- ======================================================== -->
+  <div id="transferConfirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 max-h-[92vh] overflow-y-auto custom-scroll">
+      
+      <!-- Modal Header -->
+      <div class="text-center pb-3 border-b border-slate-100 mb-4">
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-[#f59e0b] text-xs font-bold mb-2">
+          <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+          <span>Menunggu Pembayaran Transfer</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900">Transfer & Upload Bukti Bayar</h3>
+        <p class="text-xs text-slate-500 mt-0.5">Selesaikan transfer sebelum batas waktu auto-lock 20 menit berakhir.</p>
+      </div>
+
+      <!-- 20-Minute Countdown Box -->
+      <div class="p-3 bg-red-50 border border-red-200 rounded-xl mb-4 text-center pulse-danger">
+        <span class="text-[11px] font-semibold text-red-700 block">Sisa Waktu Pembayaran:</span>
+        <div id="transferCountdownDisplay" class="text-2xl font-black text-[#ef4444] font-mono tracking-wider mt-0.5">
+          20:00
+        </div>
+        <span class="text-[10px] text-red-600">Pesanan otomatis kedaluwarsa jika waktu habis.</span>
+      </div>
+
+      <!-- Total & Bank Account Info -->
+      <div class="space-y-3 mb-4">
+        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-[10px] text-slate-500 block">Total Nominal Transfer:</span>
+            <span id="transferAmountRequired" class="text-base font-bold text-[#4f46e5] font-mono">Rp 0</span>
+          </div>
+          <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">Harus Tepat</span>
+        </div>
+
+        <div class="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-1.5 text-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500">Tujuan Bank:</span>
+            <span id="bankNameDisplay" class="font-bold text-slate-900">Bank BCA</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500">Nomor Rekening:</span>
+            <div class="flex items-center gap-1">
+              <span id="bankAccountDisplay" class="font-mono font-bold text-slate-900 text-sm select-all">8830192837</span>
+              <button onclick="copyBankAccount()" class="p-1 text-[#4f46e5] hover:bg-indigo-100 rounded cursor-pointer" title="Salin No. Rekening">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-500">Atas Nama:</span>
+            <span id="bankHolderDisplay" class="font-semibold text-slate-800">a/n FortaPOS Official Store</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Form Upload Bukti Foto Cloudinary -->
+      <div class="space-y-3">
+        <label class="block text-xs font-bold text-slate-700">Lampirkan Foto Bukti Transfer <span class="text-red-500">*</span></label>
+        
+        <!-- File Input Hidden -->
+        <input 
+          type="file" 
+          id="proofFileInput" 
+          accept="image/*" 
+          onchange="handleProofImageSelected(event)" 
+          class="hidden" 
+        />
+
+        <!-- Dropzone / Trigger Area -->
+        <div 
+          onclick="triggerFileInput()" 
+          class="border-2 border-dashed border-slate-300 hover:border-[#4f46e5] bg-slate-50/80 rounded-xl p-4 text-center cursor-pointer transition-colors group relative overflow-hidden"
+        >
+          <!-- Upload Loading Spinner Overlay (Cloudinary) -->
+          <div id="proofUploadSpinner" class="hidden absolute inset-0 bg-white/95 backdrop-blur-xs flex flex-col items-center justify-center z-20 transition-all">
+            <div class="w-7 h-7 border-3 border-[#4f46e5] border-t-transparent rounded-full animate-spin mb-2"></div>
+            <p class="text-xs font-bold text-slate-800">Mengunggah ke Cloudinary...</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">Kompresi & optimasi foto otomatis</p>
+          </div>
+
+          <div id="proofPlaceholder">
+            <i data-lucide="upload-cloud" class="w-8 h-8 text-slate-400 group-hover:text-[#4f46e5] mx-auto mb-1.5 transition-colors"></i>
+            <p class="text-xs font-bold text-slate-700">Pilih / Jepret Foto Bukti Transfer</p>
+            <p class="text-[10px] text-slate-400 mt-0.5">Otomatis diunggah & dioptimalkan ke cloud</p>
+          </div>
+
+          <!-- Preview Area Container -->
+          <div id="proofImagePreviewContainer" class="hidden relative">
+            <img id="proofPreviewImg" src="" alt="Bukti Transfer" class="max-h-48 mx-auto rounded-lg shadow-sm border border-slate-200 object-contain">
+            <button 
+              type="button" 
+              onclick="clearProofImage(event)" 
+              class="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full hover:bg-red-700 shadow-md cursor-pointer"
+              title="Ganti Foto"
+            >
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+            <span id="proofFileName" class="block text-[10px] font-mono text-slate-500 mt-2 truncate"></span>
+          </div>
+        </div>
+
+        <div class="pt-2 flex flex-col gap-2">
+          <button 
+            id="btnSubmitProof" 
+            onclick="handleProofUploadSubmit()" 
+            class="w-full py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <i data-lucide="send" class="w-4 h-4"></i>
+            <span>Kirim Bukti Pembayaran</span>
+          </button>
+
+          <button 
+            onclick="handleCancelTransferOrder(true)" 
+            class="w-full py-2 text-xs text-slate-500 hover:text-red-600 font-medium transition-colors cursor-pointer"
+          >
+            Batalkan Transaksi Ini
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: STRUK TRANSAKSI THERMAL (CETAK RESMI)             -->
+  <!-- ======================================================== -->
+  <div id="receiptModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="printer" class="w-4 h-4 text-[#4f46e5]"></i>
+          <span class="text-xs font-bold text-slate-900">Format Struk Kasir</span>
+        </div>
+        <button onclick="closeReceiptModal()" class="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Thermal Paper Receipt Preview -->
+      <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 overflow-x-auto">
+        <pre id="receiptModalContent" class="font-mono text-xs text-slate-800 leading-relaxed whitespace-pre font-medium"></pre>
+      </div>
+
+      <div class="mt-4 flex gap-2">
+        <button onclick="window.print()" class="flex-1 py-2 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer">
+          <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+          <span>Cetak Struk</span>
+        </button>
+        <button onclick="closeReceiptModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer">
+          Tutup
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: GANTI ID TOKO (storeId URL Param)                 -->
+  <!-- ======================================================== -->
+  <div id="storeSwitcherModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
+      <div class="text-center mb-4">
+        <div class="w-10 h-10 rounded-xl bg-indigo-50 text-[#4f46e5] flex items-center justify-center mx-auto mb-2">
+          <i data-lucide="store" class="w-5 h-5"></i>
+        </div>
+        <h3 class="text-sm font-bold text-slate-900">Ganti ID Toko (storeId)</h3>
+        <p class="text-[11px] text-slate-500 mt-0.5">Aplikasi otomatis membaca produk di <code>/stores/{storeId}/products</code> dan ongkir di <code>/stores/{storeId}/config/shipping</code></p>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Parameter storeId</label>
+          <input 
+            type="text" 
+            id="inputModalStoreId" 
+            placeholder="Contoh: toko-utama atau store-1" 
+            class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Parameter cashierId (ID Karyawan)</label>
+          <input 
+            type="text" 
+            id="inputModalCashierId" 
+            placeholder="Contoh: EMP-002 atau kosongkan untuk owner" 
+            class="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-[#4f46e5] focus:outline-hidden"
+          />
+        </div>
+
+        <div class="pt-2 flex gap-2">
+          <button onclick="applyNewStoreId()" class="flex-1 py-2 bg-[#4f46e5] hover:bg-[#4338ca] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer">
+            Terapkan & Muat Toko
+          </button>
+          <button onclick="closeStoreSwitcherModal()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer">
+            Batal
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: PREVIEW FOTO BUKTI PEMBAYARAN                     -->
+  <!-- ======================================================== -->
+  <div id="proofPreviewModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-100">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+        <div class="flex items-center gap-1.5">
+          <i data-lucide="image" class="w-4 h-4 text-[#4f46e5]"></i>
+          <span class="text-xs font-bold text-slate-900">Foto Bukti Transfer</span>
+        </div>
+        <button onclick="closeProofPreviewModal()" class="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="bg-slate-100 rounded-xl overflow-hidden max-h-[60vh] flex items-center justify-center p-2">
+        <img id="modalProofImgDisplay" src="" alt="Bukti Transfer" class="max-h-[55vh] w-auto object-contain rounded-lg">
+      </div>
+      <div class="mt-4 text-center">
+        <button onclick="closeProofPreviewModal()" class="px-5 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-colors cursor-pointer">
+          Tutup
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: ALERT NOTIFIKASI KUSTOM                           -->
+  <!-- ======================================================== -->
+  <div id="customAlertModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center transform scale-95 transition-transform duration-300">
+      <div id="alertIconContainer" class="w-12 h-12 rounded-2xl bg-emerald-50 text-[#10b981] flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+      </div>
+      <h3 id="alertTitle" class="text-base font-bold text-slate-900">Pesanan Berhasil</h3>
+      <p id="alertMessage" class="text-xs text-slate-600 mt-2 leading-relaxed">
+        Pesan notifikasi.
+      </p>
+      <div class="mt-5">
+        <button 
+          id="alertConfirmBtn" 
+          onclick="closeAlertModal()" 
+          class="w-full py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+        >
+          Mengerti
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: STATUS KONEKSI FIREBASE & SIMULATOR KASIR         -->
+  <!-- ======================================================== -->
+  <div id="configModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-indigo-50 text-[#4f46e5] flex items-center justify-center">
+            <i data-lucide="database" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">Status Firestore & Sinkron Kasir</h3>
+            <p class="text-[11px] text-slate-500">Project: fortaappsubscribe</p>
+          </div>
+        </div>
+        <button onclick="closeConfigModal()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Status Firestore</label>
+          <div id="firebaseConnectionBadge" class="p-2.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[11px] flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span id="firebaseStatusText">Firebase SDK v8 Terinisialisasi (fortaappsubscribe)</span>
+          </div>
+        </div>
+
+        <!-- Real-Time Shipping & Bank Config State Box -->
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Sinkronisasi Kasir Real-Time (/config/shipping)</label>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Path Dokumen:</span>
+              <code class="font-mono text-[#4f46e5] text-[11px]" id="cfgShippingDocPath">/stores/{storeId}/config/shipping</code>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Status Ongkir Kasir:</span>
+              <span id="cfgShippingStatusText" class="font-bold px-2 py-0.5 rounded text-xs">Memuat...</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Tarif Ongkir Firestore:</span>
+              <span id="cfgShippingTarifText" class="font-bold font-mono text-xs text-slate-800">Rp 0</span>
+            </div>
+            <!-- Status bankStatus di Firestore -->
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">Status Transfer Bank (bankStatus):</span>
+              <span id="cfgBankStatusText" class="font-bold px-2 py-0.5 rounded text-xs">Aktif</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulation Tools for Cashier App Synchronization -->
+        <div class="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-800 text-xs">Simulasi Perubahan dari Kasir:</span>
+            <span class="text-[10px] text-slate-500">Uji Real-Time Sync</span>
+          </div>
+          
+          <!-- Shipping simulator -->
+          <p class="text-[11px] text-slate-600">1. Toggle Ongkir Dinamis:</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button 
+              onclick="simulateCashierShippingUpdate(true, 10000)" 
+              class="py-1.5 px-2 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition-all shadow-2xs text-center cursor-pointer"
+            >
+              Ongkir ON (Rp 10.000)
+            </button>
+            <button 
+              onclick="simulateCashierShippingUpdate(false, 0)" 
+              class="py-1.5 px-2 bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition-all shadow-2xs text-center cursor-pointer"
+            >
+              Ongkir OFF (Rp 0)
+            </button>
+          </div>
+
+          <!-- Bank Transfer Auto-Lock simulator -->
+          <p class="text-[11px] text-slate-600 pt-1">2. Auto-Lock Transfer Bank (bankStatus):</p>
+          <div class="grid grid-cols-2 gap-2">
+            <button 
+              onclick="simulateCashierBankStatusUpdate(true)" 
+              class="py-1.5 px-2 bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition-all shadow-2xs text-center cursor-pointer"
+            >
+              Bank ON (Bisa Dipilih)
+            </button>
+            <button 
+              onclick="simulateCashierBankStatusUpdate(false)" 
+              class="py-1.5 px-2 bg-white hover:bg-slate-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs text-center cursor-pointer"
+            >
+              Bank OFF (Terkunci)
+            </button>
+          </div>
+
+          <!-- Order Status Simulator for Cash Orders -->
+          <p class="text-[11px] text-slate-600 pt-1">3. Simulasi Status Pesanan Kasir (Cash Order):</p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button 
+              onclick="simulateLatestOrderStatusUpdate('Pending')" 
+              class="py-1 px-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded text-[10px] font-semibold text-center cursor-pointer"
+            >
+              Status: Pending
+            </button>
+            <button 
+              onclick="simulateLatestOrderStatusUpdate('Menyiapkan Barang')" 
+              class="py-1 px-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-semibold text-center cursor-pointer"
+            >
+              Status: Menyiapkan
+            </button>
+            <button 
+              onclick="simulateLatestOrderStatusUpdate('Segera Kirimkan Barang')" 
+              class="py-1 px-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-semibold text-center cursor-pointer"
+            >
+              Status: Segera Kirimkan
+            </button>
+            <button 
+              onclick="simulateLatestOrderStatusUpdate('Menunggu Pelanggan Datang')" 
+              class="py-1 px-1.5 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-semibold text-center cursor-pointer"
+            >
+              Status: Siap Diambil
+            </button>
+            <button 
+              onclick="simulateLatestOrderStatusUpdate('Verified')" 
+              class="col-span-2 py-1 px-1.5 bg-slate-900 hover:bg-black text-white rounded text-[10px] font-bold text-center cursor-pointer"
+            >
+              Status: Verified (Pesanan Selesai - Hitam)
+            </button>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex justify-end">
+          <button onclick="closeConfigModal()" class="w-full sm:w-auto px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer">
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="bg-white border-t border-slate-200 mt-12 py-6 text-center text-xs text-slate-500">
+    <div class="max-w-4xl mx-auto px-4 space-y-2">
+      <div class="flex items-center justify-center gap-2 text-slate-700 font-semibold flex-wrap">
+        <span>FortaPOS-Online CUSTOMERS</span>
+        <span>·</span>
+        <span class="text-slate-400 font-normal">Real-Time Cloud Firestore SDK v8</span>
+      </div>
+      <div class="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-mono">
+        <span>Versi Halaman:</span>
+        <span class="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-500 font-medium">OSV1.0.0.V8</span>
+      </div>
+      <p class="text-[11px] text-slate-400">
+        Jalur Database: <code>/stores/{storeId}/products</code> & <code>/stores/{storeId}/config/shipping</code>
+      </p>
+    </div>
+  </footer>
+
+  <!-- ======================================================== -->
+  <!-- JAVASCRIPT: LOGIKA LENGKAP MANDIRI TERHUBUNG FIREBASE    -->
+  <!-- ======================================================== -->
+  <script>
+    // ========================================================
+    // 1. KONFIGURASI RESMI & INISIALISASI FIREBASE SDK V8 COMPAT
+    // ========================================================
+    const firebaseConfig = {
+    apiKey: "AIzaSyDLP4Jnfw1nJYqlY6Y_8ZzcVaLe3QYVyv8",
+    authDomain: "kasir-toko-nurjanah.firebaseapp.com",
+    projectId: "kasir-toko-nurjanah",
+    storageBucket: "kasir-toko-nurjanah.firebasestorage.app",
+    messagingSenderId: "109452166589",
+    appId: "1:109452166589:web:6348ce5183c4d41e74bed4"
+  };
+
+    let app = null;
+    let db = null;
+
+    try {
+      if (typeof firebase !== 'undefined') {
+        if (!firebase.apps.length) {
+          app = firebase.initializeApp(firebaseConfig);
+        } else {
+          app = firebase.app();
+        }
+        db = firebase.firestore();
+        // Enable persistent cache / settings
+        db.settings({ cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED });
+        console.log("Firebase SDK v8 initialized successfully with project:", firebaseConfig.projectId);
+      } else {
+        console.warn("Firebase SDK script not loaded yet, running in local fallback mode.");
+      }
+    } catch(err) {
+      console.error("Firebase initialize error:", err);
+    }
+
+    // ========================================================
+    // 2. AMBIL PARAMETER URL '?storeId=' & '?cashierId='
+    // ========================================================
+    const urlParams = new URLSearchParams(window.location.search);
+    let currentStoreId = urlParams.get('storeId') || localStorage.getItem('fortapos_storeId') || 'toko-utama';
+    
+    // PENANGKAPAN PARAMETER URL BARU ('cashierId')
+    const rawCashierParam = urlParams.get('cashierId');
+    let currentCashierId = (rawCashierParam !== null && rawCashierParam.trim() !== '') 
+      ? rawCashierParam.trim() 
+      : 'owner';
+
+    // Simpan ke localStorage agar konsisten antar refresh
+    localStorage.setItem('fortapos_storeId', currentStoreId);
+    localStorage.setItem('fortapos_cashierId', currentCashierId);
+
+    // ========================================================
+    // 3. STATE APLIKASI
+    // ========================================================
+    let currentUser = null; // { name, phone, address, registeredAt }
+    let customerAddress = ''; // Alias memori alamat pelanggan
+    let dbProducts = []; // Array data produk master langsung dari Firestore
+    let allProducts = dbProducts; // Kompatibilitas alias
+    let activeCategory = 'all';
+    let searchQuery = '';
+    let cart = []; // Array of { id, nama, name, sellPrice, kategori, qty, imageUrl }
+    let selectedDelivery = 'antar'; // 'antar' | 'ambil'
+    let selectedPayment = 'cash'; // 'cash' | 'transfer'
+
+    // STATE KONFIGURASI ONGKIR & BANK DARI FIRESTORE
+    // Path: /stores/{storeId}/config/shipping
+    let shippingConfig = {
+      status: true, // boolean: true (ON) atau false (OFF)
+      tarif: 10000, // nilai ongkir dari Firestore jika status ON
+      bankStatus: true, // auto-lock transfer jika false/OFF
+      isLoaded: false
+    };
+    let currentOngkir = 10000; // Biaya antar aktif saat ini
+
+    // State View Tab: 'catalog' | 'orders'
+    let customerActiveTab = 'catalog';
+    let myOrdersList = [];
+    let activeOrderFilter = 'all';
+    let queriedPhoneOverride = ''; // Jika pelanggan ingin mengecek nomor WhatsApp lain
+
+    // State Transfer & 20-Menit Auto-Lock Timer
+    let activePendingOrder = null;
+    let countdownInterval = null;
+    let countdownSeconds = 1200; // 20 Menit
+
+    // KONFIGURASI REST API CLOUDINARY UNTUK BUKTI TRANSFER
+    const CLOUDINARY_CLOUD_NAME = 'aesrrczo';
+    const CLOUDINARY_UPLOAD_PRESET = 'forta_preset';
+    const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+
+    let uploadedProofUrl = '';
+    let isCloudinaryUploading = false;
+    let pendingCloudinaryUploadPromise = null;
+
+    // Data Rekening Resmi Toko
+    const storeBankInfo = {
+      bankName: 'Bank BCA',
+      accountNumber: '8830192837',
+      accountHolder: 'FortaPOS Official Store'
+    };
+
+    // Unsubscribe listeners
+    let unsubscribeProducts = null;
+    let unsubscribeShipping = null;
+    let unsubscribeMyOrders = null;
+
+    // ========================================================
+    // 4. INISIALISASI DOM
+    // ========================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      updateStoreHeaderAndPathBadges();
+      checkCustomerAuthentication();
+      initShippingConfigRealtimeListener(); // Query & sinkronisasi ongkir + bankStatus Firestore
+      initProductCatalogRealtimeListener(); // Katalog produk real-time
+      loadCartFromStorage();
+      checkExistingPendingTransfer();
+    });
+
+    // PENYESUAIAN HEADER STRIP DINAMIS
+    function updateStoreHeaderAndPathBadges() {
+      const headerStore = document.getElementById('headerStoreName');
+      const headerLabel = document.getElementById('headerLabelStoreOrCashier');
+      const inputModalStoreId = document.getElementById('inputModalStoreId');
+      const inputModalCashierId = document.getElementById('inputModalCashierId');
+      const cfgPathProducts = document.getElementById('cfgPathProducts');
+      const cfgPathOrders = document.getElementById('cfgPathOrders');
+      const cfgPathShipping = document.getElementById('cfgPathShipping');
+      const cfgShippingDocPath = document.getElementById('cfgShippingDocPath');
+      const loadingPathLabel = document.getElementById('loadingPathLabel');
+      const ordersPathBadge = document.getElementById('ordersPathBadge');
+      const cfgCashierId = document.getElementById('cfgCashierId');
+
+      const isCustomCashier = currentCashierId && currentCashierId.toLowerCase() !== 'owner';
+
+      if (isCustomCashier) {
+        if (headerStore) headerStore.textContent = `Kasir: ${currentCashierId}`;
+        if (headerLabel) headerLabel.textContent = 'Petugas:';
+      } else {
+        if (headerStore) headerStore.textContent = currentStoreId;
+        if (headerLabel) headerLabel.textContent = 'Toko:';
+      }
+
+      if (inputModalStoreId) inputModalStoreId.value = currentStoreId;
+      if (inputModalCashierId) inputModalCashierId.value = isCustomCashier ? currentCashierId : '';
+      if (cfgPathProducts) cfgPathProducts.textContent = `/stores/${currentStoreId}/products`;
+      if (cfgPathOrders) cfgPathOrders.textContent = `/stores/${currentStoreId}/online_orders`;
+      if (cfgPathShipping) cfgPathShipping.textContent = `/stores/${currentStoreId}/config/shipping`;
+      if (cfgShippingDocPath) cfgShippingDocPath.textContent = `/stores/${currentStoreId}/config/shipping`;
+      if (loadingPathLabel) loadingPathLabel.textContent = `Path: /stores/${currentStoreId}/products`;
+      if (ordersPathBadge) ordersPathBadge.textContent = `/stores/${currentStoreId}/online_orders`;
+      if (cfgCashierId) cfgCashierId.textContent = currentCashierId;
+    }
+
+    function openStoreSwitcherModal() {
+      const modal = document.getElementById('storeSwitcherModal');
+      const inputStore = document.getElementById('inputModalStoreId');
+      const inputCashier = document.getElementById('inputModalCashierId');
+      if (inputStore) inputStore.value = currentStoreId;
+      if (inputCashier) inputCashier.value = (currentCashierId !== 'owner') ? currentCashierId : '';
+      if (modal) modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeStoreSwitcherModal() {
+      const modal = document.getElementById('storeSwitcherModal');
+      if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function applyNewStoreId() {
+      const inputStore = document.getElementById('inputModalStoreId');
+      const inputCashier = document.getElementById('inputModalCashierId');
+      const storeVal = (inputStore?.value || '').trim();
+      const cashierVal = (inputCashier?.value || '').trim();
+
+      if (!storeVal) {
+        showCustomAlert('Perhatian', 'ID Toko tidak boleh kosong.', 'warning');
+        return;
+      }
+
+      currentStoreId = storeVal;
+      currentCashierId = cashierVal ? cashierVal : 'owner';
+
+      localStorage.setItem('fortapos_storeId', currentStoreId);
+      localStorage.setItem('fortapos_cashierId', currentCashierId);
+      
+      // Update parameter URL
+      let newUrl = window.location.pathname + '?storeId=' + encodeURIComponent(currentStoreId);
+      if (currentCashierId !== 'owner') {
+        newUrl += '&cashierId=' + encodeURIComponent(currentCashierId);
+      }
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+
+      closeStoreSwitcherModal();
+      updateStoreHeaderAndPathBadges();
+      
+      // Re-initialize listeners for new store
+      initShippingConfigRealtimeListener();
+      initProductCatalogRealtimeListener();
+      loadCartFromStorage();
+      initCustomerOrdersListener();
+
+      showCustomAlert('Toko Berhasil Diubah', `Katalog & pesanan sekarang terhubung ke toko: "${currentStoreId}" (${currentCashierId !== 'owner' ? 'Kasir: ' + currentCashierId : 'Owner'})`, 'info');
+    }
+
+    function copyStoreUrl() {
+      let shareUrl = window.location.origin + window.location.pathname + '?storeId=' + encodeURIComponent(currentStoreId);
+      if (currentCashierId && currentCashierId !== 'owner') {
+        shareUrl += '&cashierId=' + encodeURIComponent(currentCashierId);
+      }
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          showCustomAlert('Link Disalin', `Link toko berhasil disalin ke clipboard:\n${shareUrl}`, 'success');
+        }).catch(() => {
+          prompt('Salin link toko ini:', shareUrl);
+        });
+      } else {
+        prompt('Salin link toko ini:', shareUrl);
+      }
+    }
+
+    // ========================================================
+    // SINKRONISASI REAL-TIME ONGKIR & BANK STATUS
+    // Path: /stores/{storeId}/config/shipping
+    // ========================================================
+    function initShippingConfigRealtimeListener() {
+      if (unsubscribeShipping) {
+        unsubscribeShipping();
+        unsubscribeShipping = null;
+      }
+
+      // Fallback cache lokal jika jaringan terputus sementara
+      try {
+        const cached = localStorage.getItem('fortapos_shipping_config_' + currentStoreId);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          shippingConfig = {
+            status: Boolean(parsed.status),
+            tarif: Number(parsed.tarif) || 0,
+            bankStatus: parsed.bankStatus !== undefined ? Boolean(parsed.bankStatus) : true,
+            isLoaded: true
+          };
+          applyShippingCostLogic();
+          updateBankPaymentUI();
+        }
+      } catch(e) {}
+
+      if (!db) {
+        console.warn("Firestore belum siap untuk membaca config/shipping");
+        return;
+      }
+
+      try {
+        const shippingDocRef = db.collection('stores')
+          .doc(currentStoreId)
+          .collection('config')
+          .doc('shipping');
+
+        unsubscribeShipping = shippingDocRef.onSnapshot((docSnapshot) => {
+          if (docSnapshot.exists) {
+            const data = docSnapshot.data() || {};
+            
+            // 1. Evaluasi status config ongkir (menerima boolean true, string "true", atau "on")
+            const isStatusOn = (
+              data.status === true || 
+              String(data.status).toLowerCase() === 'true' || 
+              String(data.status).toLowerCase() === 'on' ||
+              String(data.status).toLowerCase() === 'active'
+            );
+
+            // Menerima field 'tarif' atau sinonim 'shippingCost', 'ongkir', 'cost'
+            const rawTarif = data.tarif !== undefined ? data.tarif : (data.shippingCost ?? data.ongkir ?? data.cost ?? 0);
+            const parsedTarif = Math.max(0, Number(rawTarif) || 0);
+
+            // 2. AUTO-LOCK FITUR TRANSFER DARI KASIR
+            // Jika field bankStatus bernilai false/OFF, maka pembayaran "Transfer Bank" terkunci
+            const isBankDisabled = (
+              data.bankStatus === false ||
+              String(data.bankStatus).toLowerCase() === 'false' ||
+              String(data.bankStatus).toLowerCase() === 'off' ||
+              String(data.bankStatus).toLowerCase() === 'disabled' ||
+              String(data.bankStatus).toLowerCase() === 'locked'
+            );
+            const bankStatusActive = !isBankDisabled;
+
+            shippingConfig = {
+              status: isStatusOn,
+              tarif: parsedTarif,
+              bankStatus: bankStatusActive,
+              isLoaded: true
+            };
+          } else {
+            // Jika dokumen belum dibuat di kasir, set default OFF (Gratis Ongkir Rp 0, bank aktif)
+            shippingConfig = {
+              status: false,
+              tarif: 0,
+              bankStatus: true,
+              isLoaded: true
+            };
+          }
+
+          // Simpan konfigurasi ke cache lokal
+          localStorage.setItem('fortapos_shipping_config_' + currentStoreId, JSON.stringify(shippingConfig));
+
+          // Terapkan logika biaya antar dan perbarui UI
+          applyShippingCostLogic();
+          updateShippingUIElements();
+          updateBankPaymentUI();
+
+        }, (error) => {
+          console.error("Error reading /stores/" + currentStoreId + "/config/shipping:", error);
+        });
+
+      } catch(err) {
+        console.error("Exception in initShippingConfigRealtimeListener:", err);
+      }
+    }
+
+    // UPDATE UI AUTO-LOCK FITUR TRANSFER BANK
+    function updateBankPaymentUI() {
+      const btnTransfer = document.getElementById('btnPayTransfer');
+      const bankDisabledBadge = document.getElementById('bankDisabledBadge');
+      const bankDescText = document.getElementById('bankDescText');
+      const cfgBankStatusText = document.getElementById('cfgBankStatusText');
+      const bankSyncStatusBadge = document.getElementById('bankSyncStatusBadge');
+
+      if (cfgBankStatusText) {
+        if (shippingConfig.bankStatus) {
+          cfgBankStatusText.textContent = 'ON (Dapat Dipilih)';
+          cfgBankStatusText.className = 'font-bold px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800';
+        } else {
+          cfgBankStatusText.textContent = 'OFF (Terkunci Kasir)';
+          cfgBankStatusText.className = 'font-bold px-2 py-0.5 rounded text-xs bg-rose-100 text-rose-700';
+        }
+      }
+
+      if (!shippingConfig.bankStatus) {
+        // KASUS TERKUNCI: Kasir menonaktifkan Transfer Bank
+        if (btnTransfer) {
+          btnTransfer.disabled = true;
+          btnTransfer.classList.add('opacity-50', 'cursor-not-allowed', 'bg-slate-100');
+          btnTransfer.classList.remove('hover:border-slate-300', 'bg-white', 'border-[#4f46e5]', 'bg-indigo-50/40');
+        }
+        if (bankDisabledBadge) bankDisabledBadge.classList.remove('hidden');
+        if (bankDescText) bankDescText.textContent = 'Nonaktif dari kasir';
+        if (bankSyncStatusBadge) {
+          bankSyncStatusBadge.textContent = 'Transfer Bank Terkunci';
+          bankSyncStatusBadge.className = 'text-[10px] font-bold text-rose-500';
+        }
+
+        // Jika pelanggan sedang memilih transfer, paksa otomatis pindah ke Cash/Tunai
+        if (selectedPayment === 'transfer') {
+          selectPaymentMethod('cash');
+        }
+      } else {
+        // KASUS TERBUKA: Transfer Bank aktif
+        if (btnTransfer) {
+          btnTransfer.disabled = false;
+          btnTransfer.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-slate-100');
+          if (selectedPayment !== 'transfer') {
+            btnTransfer.classList.add('bg-white', 'hover:border-slate-300');
+          }
+        }
+        if (bankDisabledBadge) bankDisabledBadge.classList.add('hidden');
+        if (bankDescText) bankDescText.textContent = 'Upload bukti transfer';
+        if (bankSyncStatusBadge) {
+          bankSyncStatusBadge.textContent = 'Pilih Opsi';
+          bankSyncStatusBadge.className = 'text-[10px] text-slate-500 font-medium';
+        }
+      }
+    }
+
+    function applyShippingCostLogic() {
+      if (selectedDelivery === 'antar') {
+        if (shippingConfig.status === true) {
+          currentOngkir = shippingConfig.tarif;
+        } else {
+          currentOngkir = 0;
+        }
+      } else {
+        currentOngkir = 0;
+      }
+
+      updateCheckoutBreakdown();
+      updateShippingUIElements();
+    }
+
+    function updateShippingUIElements() {
+      const antarBadge = document.getElementById('antarOngkirBadge');
+      const antarDesc = document.getElementById('antarMethodDesc');
+      const bannerShipping = document.getElementById('bannerShippingStatus');
+
+      if (antarBadge) {
+        if (shippingConfig.status === true) {
+          antarBadge.textContent = formatRupiah(shippingConfig.tarif);
+          antarBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-[#4f46e5]';
+        } else {
+          antarBadge.textContent = 'Gratis Ongkir';
+          antarBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200';
+        }
+      }
+
+      if (antarDesc) {
+        if (shippingConfig.status === true) {
+          antarDesc.textContent = `Kurir antar ke alamat Anda (Tarif: ${formatRupiah(shippingConfig.tarif)})`;
+        } else {
+          antarDesc.textContent = 'Kurir antar ke alamat Anda (Promo Gratis Ongkir)';
+        }
+      }
+
+      if (bannerShipping) {
+        if (shippingConfig.status === true) {
+          bannerShipping.innerHTML = `Ongkir Antar: <span class="font-bold text-slate-800">${formatRupiah(shippingConfig.tarif)}</span> (Kasir: ON)`;
+        } else {
+          bannerShipping.innerHTML = `Ongkir Antar: <span class="font-bold text-emerald-700 bg-emerald-100 px-1 py-0.2 rounded text-[11px]">Gratis Ongkir</span> (Kasir: OFF)`;
+        }
+      }
+
+      const cfgStatusText = document.getElementById('cfgShippingStatusText');
+      const cfgTarifText = document.getElementById('cfgShippingTarifText');
+
+      if (cfgStatusText) {
+        if (shippingConfig.status === true) {
+          cfgStatusText.textContent = 'ON (Aktif)';
+          cfgStatusText.className = 'font-bold px-2 py-0.5 rounded text-xs bg-indigo-100 text-[#4f46e5]';
+        } else {
+          cfgStatusText.textContent = 'OFF (Gratis Ongkir)';
+          cfgStatusText.className = 'font-bold px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700';
+        }
+      }
+
+      if (cfgTarifText) {
+        cfgTarifText.textContent = formatRupiah(shippingConfig.tarif);
+      }
+    }
+
+    // Helper simulasi update config kasir
+    async function simulateCashierShippingUpdate(newStatus, newTarif) {
+      if (!db) {
+        showCustomAlert('Firebase Belum Siap', 'Firebase SDK belum terhubung.', 'danger');
+        return;
+      }
+      try {
+        await db.collection('stores')
+          .doc(currentStoreId)
+          .collection('config')
+          .doc('shipping')
+          .set({
+            status: newStatus,
+            tarif: Number(newTarif) || 0,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+        showCustomAlert(
+          'Konfigurasi Kasir Berhasil Disimpan',
+          `Data ongkir /stores/${currentStoreId}/config/shipping diubah:\nStatus: ${newStatus ? 'ON' : 'OFF'}\nTarif: ${formatRupiah(newTarif)}`,
+          'success'
+        );
+      } catch(err) {
+        console.error("Gagal update config/shipping simulator:", err);
+        showCustomAlert('Gagal Mengubah', `Terjadi error: ${err.message}`, 'danger');
+      }
+    }
+
+    // Helper simulasi toggle bankStatus dari kasir
+    async function simulateCashierBankStatusUpdate(newBankStatus) {
+      if (!db) {
+        showCustomAlert('Firebase Belum Siap', 'Firebase SDK belum terhubung.', 'danger');
+        return;
+      }
+      try {
+        await db.collection('stores')
+          .doc(currentStoreId)
+          .collection('config')
+          .doc('shipping')
+          .set({
+            bankStatus: Boolean(newBankStatus),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+        showCustomAlert(
+          'Status Bank Kasir Diperbarui',
+          `Field bankStatus diatur menjadi: ${newBankStatus ? 'true (ON)' : 'false (OFF)'}.\n\nJika OFF, pilihan Transfer Bank otomatis terkunci pada layar pelanggan!`,
+          'success'
+        );
+      } catch(err) {
+        console.error("Gagal update bankStatus:", err);
+        showCustomAlert('Gagal Mengubah', `Terjadi error: ${err.message}`, 'danger');
+      }
+    }
+
+    // Helper simulasi perubahan status pesanan kasir
+    async function simulateLatestOrderStatusUpdate(newStatus) {
+      if (!db) {
+        showCustomAlert('Firebase Belum Siap', 'Firebase SDK belum terhubung.', 'danger');
+        return;
+      }
+      if (!myOrdersList || myOrdersList.length === 0) {
+        showCustomAlert('Belum Ada Pesanan', 'Silakan buat minimal 1 pesanan terlebih dahulu untuk menguji simulasi update status kasir.', 'warning');
+        return;
+      }
+
+      const latestOrder = myOrdersList[0];
+      try {
+        await db.collection('stores')
+          .doc(currentStoreId)
+          .collection('online_orders')
+          .doc(latestOrder.orderId)
+          .update({
+            status: newStatus,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+        showCustomAlert(
+          'Status Kasir Diperbarui',
+          `Pesanan ${latestOrder.orderId} berhasil diubah statusnya menjadi: "${newStatus}". Periksa tab Pesanan Saya untuk melihat perubahan visualnya!`,
+          'success'
+        );
+      } catch(err) {
+        console.error("Gagal simulasi update status order:", err);
+        showCustomAlert('Gagal Mengubah', `Terjadi error: ${err.message}`, 'danger');
+      }
+    }
+
+    // ========================================================
+    // 5. PENDAFTARAN & ALAMAT PELANGGAN (POP-UP AWAL)
+    // ========================================================
+    function normalizePhone(p) {
+      if (!p) return '';
+      let digits = String(p).replace(/\D/g, '');
+      if (digits.startsWith('62')) {
+        digits = '0' + digits.slice(2);
+      }
+      return digits;
+    }
+
+    function checkCustomerAuthentication() {
+      const rawUser = localStorage.getItem('fortapos_online_user');
+      if (rawUser) {
+        try {
+          currentUser = JSON.parse(rawUser);
+          customerAddress = currentUser.address || '';
+          updateUserUI();
+          initCustomerOrdersListener();
+        } catch(e) {
+          currentUser = null;
+        }
+      }
+
+      // Jika belum terdaftar atau belum memiliki alamat, munculkan pop-up awal
+      if (!currentUser || !currentUser.address) {
+        showRegistrationModal(true);
+      }
+    }
+
+    function showRegistrationModal(show) {
+      const modal = document.getElementById('registrationModal');
+      const btnClose = document.getElementById('btnRegClose');
+      const modalTitle = document.getElementById('regModalTitle');
+      const submitText = document.getElementById('btnRegSubmitText');
+
+      if (!modal) return;
+
+      if (show) {
+        // Jika sudah ada user (mengedit alamat/profil)
+        if (currentUser) {
+          const nameInput = document.getElementById('regCustomerName');
+          const phoneInput = document.getElementById('regCustomerPhone');
+          const addressInput = document.getElementById('regCustomerAddress');
+          if (nameInput) nameInput.value = currentUser.name || '';
+          if (phoneInput) phoneInput.value = currentUser.phone || '';
+          if (addressInput) addressInput.value = currentUser.address || '';
+          if (modalTitle) modalTitle.textContent = 'Edit Data & Alamat Pelanggan';
+          if (submitText) submitText.textContent = 'Simpan Perubahan';
+          if (btnClose) btnClose.classList.remove('hidden');
+        } else {
+          if (modalTitle) modalTitle.textContent = 'Selamat Datang di Toko';
+          if (submitText) submitText.textContent = 'Mulai Berbelanja';
+          if (btnClose) btnClose.classList.add('hidden');
+        }
+
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+        modal.querySelector('div').classList.remove('scale-95');
+      } else {
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        modal.querySelector('div').classList.add('scale-95');
+      }
+    }
+
+    function handleRegistrationSubmit(event) {
+      event.preventDefault();
+      const nameInput = document.getElementById('regCustomerName');
+      const phoneInput = document.getElementById('regCustomerPhone');
+      const addressInput = document.getElementById('regCustomerAddress');
+      
+      const name = nameInput.value.trim();
+      const cleanDigits = normalizePhone(phoneInput.value.trim());
+      const address = addressInput ? addressInput.value.trim() : '';
+
+      if (!name || cleanDigits.length < 8 || !address) {
+        showCustomAlert('Data Tidak Lengkap', 'Mohon lengkapi nama lengkap, nomor WhatsApp aktif (minimal 8 digit), dan Alamat Lengkap Pengiriman Anda.', 'warning');
+        return;
+      }
+
+      currentUser = {
+        name: name,
+        phone: cleanDigits,
+        address: address, // Simpan ke memori aplikasi
+        registeredAt: (currentUser && currentUser.registeredAt) ? currentUser.registeredAt : Date.now()
+      };
+      customerAddress = address;
+
+      localStorage.setItem('fortapos_online_user', JSON.stringify(currentUser));
+      updateUserUI();
+      syncCustomerProfileToFirestore(currentUser);
+      initCustomerOrdersListener();
+      showRegistrationModal(false);
+
+      showCustomAlert('Data Tersimpan!', `Halo ${currentUser.name}, data Anda dan alamat pengiriman berhasil disimpan. Selamat berbelanja!`, 'success');
+    }
+
+    function syncCustomerProfileToFirestore(user) {
+      if (!user || !user.phone || !db) return;
+      try {
+        db.collection('stores')
+          .doc(currentStoreId)
+          .collection('online_customers')
+          .doc(user.phone)
+          .set({
+            name: user.name,
+            phone: user.phone,
+            address: user.address || '',
+            storeId: currentStoreId,
+            lastActive: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true })
+          .catch(err => console.warn("Sync customer profile error:", err));
+      } catch(e) {
+        console.warn("Sync customer error:", e);
+      }
+    }
+
+    function updateUserUI() {
+      const avatarChar = document.getElementById('userAvatarChar');
+      const displayName = document.getElementById('userDisplayName');
+      const checkoutName = document.getElementById('checkoutCustomerName');
+      const checkoutPhone = document.getElementById('checkoutCustomerPhone');
+      const checkoutAddress = document.getElementById('checkoutCustomerAddress');
+      const ordersCustName = document.getElementById('ordersCustomerName');
+      const ordersCustPhone = document.getElementById('ordersCustomerPhone');
+      const ordersCustAddress = document.getElementById('ordersCustomerAddress');
+      const inputQueryWhatsapp = document.getElementById('inputQueryWhatsapp');
+
+      if (currentUser) {
+        if (avatarChar) avatarChar.textContent = currentUser.name.charAt(0).toUpperCase();
+        if (displayName) displayName.textContent = currentUser.name;
+        if (checkoutName) checkoutName.textContent = currentUser.name;
+        if (checkoutPhone) checkoutPhone.textContent = currentUser.phone;
+        if (checkoutAddress) checkoutAddress.textContent = currentUser.address || 'Alamat belum diatur';
+        if (ordersCustName) ordersCustName.textContent = currentUser.name;
+        if (ordersCustPhone) ordersCustPhone.textContent = currentUser.phone;
+        if (ordersCustAddress) ordersCustAddress.textContent = currentUser.address || 'Alamat belum diatur';
+        if (inputQueryWhatsapp && !queriedPhoneOverride) inputQueryWhatsapp.value = currentUser.phone;
+      } else {
+        if (avatarChar) avatarChar.textContent = '?';
+        if (displayName) displayName.textContent = 'Tamu';
+        if (checkoutName) checkoutName.textContent = 'Pelanggan';
+        if (checkoutPhone) checkoutPhone.textContent = '08xxxxxxxxxx';
+        if (checkoutAddress) checkoutAddress.textContent = 'Alamat belum diatur';
+        if (ordersCustName) ordersCustName.textContent = '-';
+        if (ordersCustPhone) ordersCustPhone.textContent = '-';
+        if (ordersCustAddress) ordersCustAddress.textContent = '-';
+      }
+    }
+
+    function openProfileModal() {
+      showRegistrationModal(true);
+    }
+
+    function handleManualWhatsAppQuery() {
+      const input = document.getElementById('inputQueryWhatsapp');
+      const val = normalizePhone(input?.value || '');
+      if (!val || val.length < 6) {
+        showCustomAlert('Nomor Tidak Valid', 'Masukkan minimal 6 digit nomor WhatsApp untuk melacak pesanan.', 'warning');
+        return;
+      }
+      queriedPhoneOverride = val;
+      const ordersCustPhone = document.getElementById('ordersCustomerPhone');
+      if (ordersCustPhone) ordersCustPhone.textContent = val;
+      initCustomerOrdersListener();
+    }
+
+    // ========================================================
+    // 6. TAB SWITCHER: KATALOG PRODUK vs PESANAN SAYA
+    // ========================================================
+    function toggleCustomerViewTab(tab) {
+      if (!currentUser && tab === 'orders') {
+        showRegistrationModal(true);
+        return;
+      }
+
+      customerActiveTab = tab;
+      const catalogSec = document.getElementById('catalogSection');
+      const ordersSec = document.getElementById('myOrdersSection');
+      const btnCat = document.getElementById('tabBtnCatalog');
+      const btnOrd = document.getElementById('tabBtnOrders');
+      const btnBackTop = document.getElementById('btnBackToShoppingTop');
+      const btnHeaderOrd = document.getElementById('btnMyOrdersHeader');
+
+      if (tab === 'catalog') {
+        catalogSec.classList.remove('hidden');
+        ordersSec.classList.add('hidden');
+        btnBackTop.classList.add('hidden');
+
+        btnCat.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-white text-slate-900 shadow-xs cursor-pointer';
+        btnOrd.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 cursor-pointer';
+        if (btnHeaderOrd) btnHeaderOrd.className = 'flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50 transition-colors';
+
+        renderProducts();
+      } else {
+        catalogSec.classList.add('hidden');
+        ordersSec.classList.remove('hidden');
+        btnBackTop.classList.remove('hidden');
+
+        btnOrd.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-white text-slate-900 shadow-xs cursor-pointer';
+        btnCat.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 text-slate-600 hover:text-slate-900 cursor-pointer';
+        if (btnHeaderOrd) btnHeaderOrd.className = 'flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-[#4f46e5] bg-indigo-50 text-[#4f46e5] text-xs font-semibold transition-colors';
+
+        initCustomerOrdersListener();
+      }
+      lucide.createIcons();
+    }
+
+    // ========================================================
+    // 7. MEMBACA PRODUK REAL-TIME DARI /stores/{storeId}/products
+    //    MENGGUNAKAN PROPERTI HARGA `sellPrice` & GAMBAR `imageUrl`
+    // ========================================================
+    function initProductCatalogRealtimeListener() {
+      if (unsubscribeProducts) {
+        unsubscribeProducts();
+        unsubscribeProducts = null;
+      }
+
+      const grid = document.getElementById('productGrid');
+      const emptyState = document.getElementById('emptyCatalogState');
+      const counter = document.getElementById('productCounter');
+
+      if (grid && (!dbProducts || dbProducts.length === 0)) {
+        grid.innerHTML = `
+          <div class="col-span-full py-16 text-center text-slate-400 flex flex-col items-center justify-center">
+            <div class="w-8 h-8 border-3 border-[#4f46e5] border-t-transparent rounded-full animate-spin mb-3"></div>
+            <p class="text-xs font-medium text-slate-700">Membaca produk real-time...</p>
+            <p class="text-[11px] text-slate-400 mt-1 font-mono">/stores/${currentStoreId}/products</p>
+          </div>
+        `;
+      }
+      if (emptyState) emptyState.classList.add('hidden');
+      if (counter) counter.textContent = '(Memuat...)';
+
+      if (!db) {
+        console.warn("Firestore belum siap, menggunakan cache lokal.");
+        loadLocalFallbackProducts();
+        return;
+      }
+
+      try {
+        const productsCol = db.collection('stores').doc(currentStoreId).collection('products');
+        
+        unsubscribeProducts = productsCol.onSnapshot((snapshot) => {
+          const list = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const rawPrice = data.sellPrice !== undefined ? data.sellPrice : (data.hargaJual !== undefined ? data.hargaJual : (data.harga ?? data.price ?? 0));
+            const parsedPrice = Number(rawPrice) || 0;
+            const productName = data.name || data.nama || data.title || 'Produk Tanpa Nama';
+
+            list.push({
+              id: doc.id,
+              nama: productName,
+              name: productName,
+              sellPrice: parsedPrice,
+              hargaJual: parsedPrice,
+              kategori: data.kategori || data.category || 'Umum',
+              category: data.kategori || data.category || 'Umum',
+              stok: Number(data.stok ?? data.stock ?? 0),
+              stock: Number(data.stok ?? data.stock ?? 0),
+              imageUrl: data.imageUrl || data.image || data.foto || '',
+              deskripsi: data.deskripsi || data.description || ''
+            });
+          });
+
+          dbProducts = list;
+          allProducts = dbProducts;
+          saveProductsToCache(dbProducts);
+
+          buildDynamicCategories();
+          renderProducts();
+
+        }, (error) => {
+          console.error("Error reading /stores/" + currentStoreId + "/products:", error);
+          loadLocalFallbackProducts();
+        });
+
+      } catch(err) {
+        console.error("Exception in initProductCatalogRealtimeListener:", err);
+        loadLocalFallbackProducts();
+      }
+    }
+
+    async function fetchFreshProductsFromFirestore() {
+      if (!db) return;
+      try {
+        const snap = await db.collection('stores').doc(currentStoreId).collection('products').get();
+        const freshList = [];
+        snap.forEach(doc => {
+          const data = doc.data();
+          const rawPrice = data.sellPrice !== undefined ? data.sellPrice : (data.hargaJual !== undefined ? data.hargaJual : (data.harga ?? data.price ?? 0));
+          const productName = data.name || data.nama || data.title || 'Produk Tanpa Nama';
+
+          freshList.push({
+            id: doc.id,
+            nama: productName,
+            name: productName,
+            sellPrice: Number(rawPrice) || 0,
+            hargaJual: Number(rawPrice) || 0,
+            kategori: data.kategori || data.category || 'Umum',
+            category: data.kategori || data.category || 'Umum',
+            stok: Number(data.stok ?? data.stock ?? 0),
+            stock: Number(data.stok ?? data.stock ?? 0),
+            imageUrl: data.imageUrl || data.image || data.foto || '',
+            deskripsi: data.deskripsi || data.description || ''
+          });
+        });
+        dbProducts = freshList;
+        allProducts = dbProducts;
+        saveProductsToCache(dbProducts);
+        renderProducts();
+      } catch(e) {
+        console.warn("Fetch fresh products error:", e);
+      }
+    }
+
+    function saveProductsToCache(list) {
+      try {
+        localStorage.setItem('fortapos_products_cache_' + currentStoreId, JSON.stringify(list));
+      } catch(e) {}
+    }
+
+    function loadLocalFallbackProducts() {
+      try {
+        const raw = localStorage.getItem('fortapos_products_cache_' + currentStoreId);
+        if (raw) {
+          dbProducts = JSON.parse(raw);
+          allProducts = dbProducts;
+        } else {
+          dbProducts = [];
+          allProducts = dbProducts;
+        }
+      } catch(e) {
+        dbProducts = [];
+        allProducts = dbProducts;
+      }
+      buildDynamicCategories();
+      renderProducts();
+    }
+
+    function buildDynamicCategories() {
+      const container = document.getElementById('categoryTabsContainer');
+      if (!container) return;
+
+      const categories = ['all'];
+      const productList = (dbProducts && dbProducts.length > 0) ? dbProducts : allProducts;
+      productList.forEach(p => {
+        const cat = p.kategori || p.category;
+        if (cat && !categories.includes(cat)) {
+          categories.push(cat);
+        }
+      });
+
+      let html = '';
+      categories.forEach(cat => {
+        const isSelected = (activeCategory === cat);
+        const label = (cat === 'all') ? 'Semua Kategori' : cat;
+        const btnClass = isSelected 
+          ? 'category-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-[#4f46e5] text-white shadow-xs cursor-pointer'
+          : 'category-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer';
+
+        html += `
+          <button 
+            onclick="selectCategory('${escapeHtml(cat)}')" 
+            id="tab-cat-${escapeHtml(cat)}" 
+            class="${btnClass}"
+          >
+            ${escapeHtml(label)}
+          </button>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function selectCategory(cat) {
+      activeCategory = cat;
+      buildDynamicCategories();
+      renderProducts();
+    }
+
+    function handleSearchChange(query) {
+      searchQuery = query.trim().toLowerCase();
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (clearBtn) {
+        if (searchQuery) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      renderProducts();
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('productSearchInput');
+      if (input) input.value = '';
+      handleSearchChange('');
+    }
+
+    function resetSearchAndCategory() {
+      activeCategory = 'all';
+      clearSearch();
+      buildDynamicCategories();
+      renderProducts();
+    }
+
+    // ========================================================
+    // RENDER PRODUK KATALOG: IMPLEMENTASI FOTO PRODUK + LAZY LOADING
+    // Ketentuan 1, 2, & 3:
+    // - Frame box div atas merender: <img src="${p.imageUrl || 'https://placehold.co'}" loading="lazy" class="w-full h-full object-cover rounded-t-xl" alt="${p.name}">
+    // - Klik pada area frame foto tetap memicu addToCart('${p.id}')
+    // - Hanya tampilkan pesan limit stok jika stok <= 5 (sembunyikan jika stok melimpah)
+    // ========================================================
+    function renderProducts() {
+      const grid = document.getElementById('productGrid');
+      const emptyState = document.getElementById('emptyCatalogState');
+      const counter = document.getElementById('productCounter');
+      if (!grid) return;
+
+      const productList = (dbProducts && dbProducts.length > 0) ? dbProducts : allProducts;
+
+      let filtered = productList.filter(prod => {
+        const matchCat = (activeCategory === 'all' || prod.kategori === activeCategory || prod.category === activeCategory);
+        const prodName = (prod.name || prod.nama || '').toLowerCase();
+        const prodCat = (prod.kategori || prod.category || '').toLowerCase();
+        const matchSearch = (!searchQuery || prodName.includes(searchQuery) || prodCat.includes(searchQuery));
+        return matchCat && matchSearch;
+      });
+
+      if (counter) counter.textContent = `(${filtered.length} produk)`;
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '';
+        if (emptyState) emptyState.classList.remove('hidden');
+        return;
+      }
+
+      if (emptyState) emptyState.classList.add('hidden');
+
+      let html = '';
+      filtered.forEach(p => {
+        const inCartItem = cart.find(c => c.id === p.id);
+        const currentQty = inCartItem ? inCartItem.qty : 0;
+        const isOutOfStock = (p.stok <= 0);
+        // Logika penyembunyian stok melimpah: hanya tampil jika stok <= 5 dan > 0
+        const isLowStock = (!isOutOfStock && p.stok <= 5);
+        const prodName = p.name || p.nama || 'Produk';
+
+        html += `
+          <div 
+            class="group bg-white rounded-2xl border border-slate-200/90 hover:border-indigo-300 hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col justify-between relative cursor-pointer active:scale-98"
+            onclick="addToCart('${p.id}')"
+          >
+            <!-- Badge Diskon / Kategori & Limit Stok -->
+            <div class="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1 pointer-events-none">
+              <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/90 backdrop-blur-xs text-slate-700 shadow-2xs border border-slate-100">
+                ${escapeHtml(p.kategori || p.category || 'Umum')}
+              </span>
+              ${isLowStock ? `
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
+                  Stok tinggal ${p.stok} lagi!
+                </span>
+              ` : ''}
+              ${isOutOfStock ? `
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-600 text-white shadow-2xs">
+                  Stok Habis
+                </span>
+              ` : ''}
+            </div>
+
+            <!-- Area Frame Box Div Atas (Foto Produk dengan Lazy Loading & Klik Frame Aktif) -->
+            <div 
+              class="w-full aspect-square bg-slate-100 relative overflow-hidden flex items-center justify-center cursor-pointer"
+              onclick="addToCart('${p.id}')"
+            >
+              <img 
+                src="${p.imageUrl || 'https://placehold.co'}" 
+                loading="lazy" 
+                class="w-full h-full object-cover rounded-t-xl group-hover:scale-105 transition-transform duration-300" 
+                alt="${escapeHtml(prodName)}"
+                onerror="this.onerror=null; this.src='https://placehold.co';"
+              >
+            </div>
+
+            <!-- Detail Produk -->
+            <div class="p-3 sm:p-3.5 flex-1 flex flex-col justify-between bg-white">
+              <div>
+                <h3 class="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#4f46e5] transition-colors line-clamp-2 leading-snug">
+                  ${escapeHtml(prodName)}
+                </h3>
+              </div>
+
+              <div class="pt-2 sm:pt-3 mt-2 border-t border-slate-100 flex items-center justify-between">
+                <div>
+                  <span class="text-[10px] text-slate-400 block font-medium">Harga</span>
+                  <span class="text-xs sm:text-sm font-bold text-slate-900 font-mono tabular-nums">
+                    ${formatRupiah(p.sellPrice)}
+                  </span>
+                </div>
+
+                <!-- Kontrol Keranjang: Tombol Minus Besar (Tanpa Tombol Plus) -->
+                <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+                  ${currentQty > 0 ? `
+                    <button 
+                      type="button" 
+                      onclick="decrementCartItem('${p.id}')"
+                      class="w-8 h-8 sm:w-9 sm:h-9 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center font-bold text-base shadow-xs active:scale-95 transition-all cursor-pointer"
+                      title="Kurangi barang"
+                      aria-label="Kurangi barang"
+                    >
+                      &minus;
+                    </button>
+                    <span class="w-6 text-center text-xs font-bold text-slate-800 font-mono">
+                      ${currentQty}
+                    </span>
+                  ` : ''}
+                  
+                  <div 
+                    class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center font-bold transition-all ${isOutOfStock ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : (currentQty > 0 ? 'bg-[#4f46e5] text-white shadow-xs' : 'bg-indigo-50 text-[#4f46e5] group-hover:bg-[#4f46e5] group-hover:text-white')}"
+                  >
+                    <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      grid.innerHTML = html;
+      lucide.createIcons();
+    }
+
+    // ========================================================
+    // 8. KERANJANG BELANJA (MENGGUNAKAN sellPrice & dbProducts)
+    // ========================================================
+    function addToCart(productId) {
+      const productList = (dbProducts && dbProducts.length > 0) ? dbProducts : allProducts;
+      const prod = productList.find(p => p.id === productId);
+      if (!prod) return;
+
+      if (prod.stok <= 0) {
+        showCustomAlert('Stok Habis', `Maaf, produk ${prod.name || prod.nama} saat ini sedang habis.`, 'warning');
+        return;
+      }
+
+      const existing = cart.find(c => c.id === productId);
+      if (existing) {
+        if (existing.qty < prod.stok) {
+          existing.qty += 1;
+        } else {
+          showCustomAlert('Batas Stok', `Maksimal pembelian untuk ${prod.name || prod.nama} adalah ${prod.stok} unit.`, 'warning');
+          return;
+        }
+      } else {
+        cart.push({
+          id: prod.id,
+          nama: prod.name || prod.nama,
+          name: prod.name || prod.nama,
+          sellPrice: Number(prod.sellPrice) || 0,
+          kategori: prod.kategori || prod.category || 'Umum',
+          imageUrl: prod.imageUrl || '',
+          qty: 1
+        });
+      }
+
+      saveCartToStorage();
+      renderProducts();
+      renderCartDrawer();
+      updateCartBadges();
+    }
+
+    function decrementCartItem(productId) {
+      const idx = cart.findIndex(c => c.id === productId);
+      if (idx >= 0) {
+        if (cart[idx].qty > 1) {
+          cart[idx].qty -= 1;
+        } else {
+          cart.splice(idx, 1);
+        }
+      }
+      saveCartToStorage();
+      renderProducts();
+      renderCartDrawer();
+      updateCartBadges();
+    }
+
+    function removeCartItem(productId) {
+      cart = cart.filter(c => c.id !== productId);
+      saveCartToStorage();
+      renderProducts();
+      renderCartDrawer();
+      updateCartBadges();
+    }
+
+    function clearCart() {
+      cart = [];
+      saveCartToStorage();
+      renderProducts();
+      renderCartDrawer();
+      updateCartBadges();
+    }
+
+    function confirmClearCart() {
+      if (!cart || cart.length === 0) {
+        showCustomAlert('Keranjang Sudah Kosong', 'Tidak ada barang di dalam keranjang untuk dihapus.', 'info');
+        return;
+      }
+      const shouldClear = confirm('Apakah Anda yakin ingin menghapus seluruh barang yang ada di dalam keranjang belanja?');
+      if (shouldClear) {
+        clearCart();
+        showCustomAlert('Keranjang Dikosongkan', 'Seluruh barang belanjaan berhasil dihapus dari keranjang.', 'success');
+      }
+    }
+
+    function saveCartToStorage() {
+      localStorage.setItem('fortapos_cart_' + currentStoreId, JSON.stringify(cart));
+    }
+
+    function loadCartFromStorage() {
+      try {
+        const raw = localStorage.getItem('fortapos_cart_' + currentStoreId);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          cart = parsed.map(item => ({
+            ...item,
+            nama: item.name || item.nama,
+            name: item.name || item.nama,
+            sellPrice: Number(item.sellPrice !== undefined ? item.sellPrice : (item.hargaJual || 0))
+          }));
+        } else {
+          cart = [];
+        }
+      } catch(e) {
+        cart = [];
+      }
+      updateCartBadges();
+      renderCartDrawer();
+    }
+
+    function updateCartBadges() {
+      const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
+      const subtotal = cart.reduce((sum, item) => sum + ((Number(item.sellPrice) || 0) * item.qty), 0);
+      const effectiveOngkir = (selectedDelivery === 'antar') ? currentOngkir : 0;
+      const grandTotal = subtotal + effectiveOngkir;
+
+      const badge = document.getElementById('cartCountBadge');
+      const floatingBar = document.getElementById('mobileFloatingBar');
+      const floatingCount = document.getElementById('floatingCartItemsCount');
+      const floatingTotal = document.getElementById('floatingCartTotal');
+      const floatingNote = document.getElementById('floatingShippingMethodNote');
+
+      if (badge) {
+        badge.textContent = totalQty;
+        if (totalQty > 0) badge.classList.remove('scale-0');
+        else badge.classList.add('scale-0');
+      }
+
+      if (floatingBar && floatingCount && floatingTotal) {
+        if (totalQty > 0) {
+          floatingBar.classList.remove('translate-y-full');
+          floatingCount.textContent = `${totalQty} Barang`;
+          floatingTotal.textContent = formatRupiah(grandTotal);
+          if (floatingNote) {
+            floatingNote.textContent = selectedDelivery === 'antar' 
+              ? (currentOngkir === 0 ? 'Antar (Gratis Ongkir)' : `Antar (${formatRupiah(currentOngkir)})`)
+              : 'Ambil di Toko';
+          }
+        } else {
+          floatingBar.classList.add('translate-y-full');
+        }
+      }
+    }
+
+    function toggleCartDrawer(open) {
+      const backdrop = document.getElementById('cartDrawerBackdrop');
+      const drawer = document.getElementById('cartDrawer');
+      if (!backdrop || !drawer) return;
+
+      if (open) {
+        backdrop.classList.remove('opacity-0', 'pointer-events-none');
+        drawer.classList.remove('translate-x-full');
+        renderCartDrawer();
+      } else {
+        backdrop.classList.add('opacity-0', 'pointer-events-none');
+        drawer.classList.add('translate-x-full');
+      }
+    }
+
+    function renderCartDrawer() {
+      const list = document.getElementById('cartItemsList');
+      const optionsArea = document.getElementById('checkoutOptionsArea');
+      const summaryText = document.getElementById('drawerItemSummary');
+      const clearBtn = document.getElementById('btnClearCartHeader');
+      if (!list) return;
+
+      const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
+
+      if (summaryText) summaryText.textContent = `${totalQty} produk dipilih`;
+
+      if (clearBtn) {
+        if (cart.length === 0) {
+          clearBtn.classList.add('opacity-40', 'cursor-not-allowed');
+          clearBtn.classList.remove('hover:bg-rose-50', 'active:scale-95');
+          clearBtn.disabled = true;
+        } else {
+          clearBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+          clearBtn.classList.add('hover:bg-rose-50', 'active:scale-95');
+          clearBtn.disabled = false;
+        }
+      }
+
+      if (cart.length === 0) {
+        list.innerHTML = `
+          <div class="text-center py-10 text-slate-400">
+            <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-300 shadow-inner">
+              <i data-lucide="shopping-bag" class="w-6 h-6"></i>
+            </div>
+            <p class="text-xs font-bold text-slate-600 mb-0.5">Keranjang Masih Kosong</p>
+            <p class="text-[11px] text-slate-400">Pilih produk dari katalog untuk menambahkannya ke sini.</p>
+          </div>
+        `;
+        if (optionsArea) optionsArea.classList.add('hidden');
+        lucide.createIcons();
+        return;
+      }
+
+      if (optionsArea) optionsArea.classList.remove('hidden');
+
+      let html = '';
+      cart.forEach(item => {
+        const itemPrice = Number(item.sellPrice) || 0;
+        const itemName = item.name || item.nama || 'Produk';
+        html += `
+          <div class="bg-white rounded-xl border border-slate-200/90 p-2.5 sm:p-3 flex items-center justify-between gap-2.5 shadow-2xs hover:border-slate-300 transition-colors">
+            <div class="min-w-0 flex-1">
+              <h4 class="text-xs font-bold text-slate-800 truncate">${escapeHtml(itemName)}</h4>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                <span class="font-mono text-slate-700 font-semibold">${formatRupiah(itemPrice)}</span>
+                <span>&times;</span>
+                <span class="font-bold text-[#4f46e5]">${item.qty}</span>
+                <span>=</span>
+                <span class="font-mono text-slate-900 font-bold">${formatRupiah(itemPrice * item.qty)}</span>
+              </div>
+            </div>
+
+            <!-- Kontrol Jumlah Item di Keranjang -->
+            <div class="flex items-center gap-1 shrink-0">
+              <button 
+                type="button" 
+                onclick="decrementCartItem('${item.id}')" 
+                class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center font-bold text-sm transition-colors active:scale-95 cursor-pointer"
+                title="Kurangi"
+              >
+                &minus;
+              </button>
+              <span class="w-6 text-center font-mono font-bold text-xs text-slate-800">
+                ${item.qty}
+              </span>
+              <button 
+                type="button" 
+                onclick="addToCart('${item.id}')" 
+                class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#4f46e5] flex items-center justify-center font-bold text-sm transition-colors active:scale-95 cursor-pointer"
+                title="Tambah"
+              >
+                +
+              </button>
+              <button 
+                type="button" 
+                onclick="removeCartItem('${item.id}')" 
+                class="w-7 h-7 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors ml-0.5 cursor-pointer"
+                title="Hapus item"
+              >
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      });
+
+      list.innerHTML = html;
+      lucide.createIcons();
+      updateCheckoutBreakdown();
+      updateUserUI();
+    }
+
+    function selectDeliveryMethod(method) {
+      selectedDelivery = method;
+      const btnAntar = document.getElementById('btnMethodAntar');
+      const btnAmbil = document.getElementById('btnMethodAmbil');
+      const ongkirRow = document.getElementById('summaryOngkirRow');
+
+      if (method === 'antar') {
+        btnAntar.className = 'p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer';
+        btnAmbil.className = 'p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer';
+        if (ongkirRow) ongkirRow.classList.remove('hidden');
+      } else {
+        btnAmbil.className = 'p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer';
+        btnAntar.className = 'p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer';
+        if (ongkirRow) ongkirRow.classList.add('hidden');
+      }
+
+      applyShippingCostLogic();
+    }
+
+    // Pemilihan Metode Pembayaran dengan Auto-Lock Transfer Bank
+    function selectPaymentMethod(method) {
+      if (method === 'transfer' && shippingConfig.bankStatus === false) {
+        showCustomAlert('Pembayaran Terkunci', 'Fitur Transfer Bank saat ini dinonaktifkan oleh kasir toko. Silakan gunakan pembayaran Cash / Tunai.', 'warning');
+        return;
+      }
+
+      selectedPayment = method;
+      const btnCash = document.getElementById('btnPayCash');
+      const btnTransfer = document.getElementById('btnPayTransfer');
+
+      if (method === 'cash') {
+        btnCash.className = 'p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer';
+        if (shippingConfig.bankStatus) {
+          btnTransfer.className = 'p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer';
+        } else {
+          btnTransfer.className = 'p-2.5 rounded-xl border border-slate-200 bg-slate-100 opacity-50 cursor-not-allowed text-left transition-all';
+        }
+      } else {
+        btnTransfer.className = 'p-2.5 rounded-xl border-2 border-[#4f46e5] bg-indigo-50/40 text-left transition-all active:scale-98 cursor-pointer';
+        btnCash.className = 'p-2.5 rounded-xl border border-slate-200 bg-white text-left hover:border-slate-300 transition-all active:scale-98 cursor-pointer';
+      }
+    }
+
+    function updateCheckoutBreakdown() {
+      const subtotal = cart.reduce((sum, item) => sum + ((Number(item.sellPrice) || 0) * item.qty), 0);
+      
+      let effectiveOngkir = 0;
+      let ongkirDisplayLabel = '';
+
+      if (selectedDelivery === 'antar') {
+        if (shippingConfig.status === true) {
+          effectiveOngkir = shippingConfig.tarif;
+          ongkirDisplayLabel = formatRupiah(effectiveOngkir);
+        } else {
+          effectiveOngkir = 0;
+          ongkirDisplayLabel = 'Rp 0 (Gratis)';
+        }
+      } else {
+        effectiveOngkir = 0;
+        ongkirDisplayLabel = 'Rp 0 (Ambil di Toko)';
+      }
+
+      currentOngkir = effectiveOngkir;
+      const grandTotal = subtotal + effectiveOngkir;
+
+      const subtotalEl = document.getElementById('summarySubtotal');
+      const ongkirEl = document.getElementById('summaryOngkir');
+      const ongkirTagEl = document.getElementById('summaryOngkirTag');
+      const grandTotalEl = document.getElementById('summaryGrandTotal');
+
+      if (subtotalEl) subtotalEl.textContent = formatRupiah(subtotal);
+      
+      if (ongkirEl) {
+        ongkirEl.textContent = ongkirDisplayLabel;
+        if (selectedDelivery === 'antar' && !shippingConfig.status) {
+          ongkirEl.className = 'font-mono tabular-nums text-emerald-600 font-bold';
+        } else {
+          ongkirEl.className = 'font-mono tabular-nums text-slate-800 font-semibold';
+        }
+      }
+
+      if (ongkirTagEl) {
+        if (selectedDelivery === 'antar') {
+          if (shippingConfig.status === true) {
+            ongkirTagEl.textContent = '(Tarif Kasir)';
+            ongkirTagEl.className = 'text-[10px] font-semibold text-slate-400';
+          } else {
+            ongkirTagEl.textContent = '(Gratis Ongkir)';
+            ongkirTagEl.className = 'text-[10px] font-bold text-emerald-600';
+          }
+        } else {
+          ongkirTagEl.textContent = '(Ambil Mandiri)';
+          ongkirTagEl.className = 'text-[10px] font-semibold text-slate-400';
+        }
+      }
+
+      if (grandTotalEl) grandTotalEl.textContent = formatRupiah(grandTotal);
+
+      updateCartBadges();
+    }
+
+    // ========================================================
+    // 9. SIMPAN PESANAN BARU KE: /stores/{storeId}/online_orders
+    //    MENGGUNAKAN ALAMAT DARI POP-UP AWAL & LOGIKA CASH vs TRANSFER
+    // ========================================================
+    async function handleCheckoutSubmit() {
+      if (!currentUser || !currentUser.address) {
+        showRegistrationModal(true);
+        showCustomAlert('Lengkapi Profil', 'Mohon lengkapi nama, nomor WhatsApp, dan Alamat Lengkap Pengiriman Anda terlebih dahulu.', 'warning');
+        return;
+      }
+
+      if (cart.length === 0) {
+        showCustomAlert('Keranjang Kosong', 'Silakan masukkan minimal 1 produk belanjaan ke dalam keranjang.', 'warning');
+        return;
+      }
+
+      // Proteksi jika transfer terkunci saat submit
+      if (selectedPayment === 'transfer' && shippingConfig.bankStatus === false) {
+        selectPaymentMethod('cash');
+        showCustomAlert('Pembayaran Dialihkan', 'Fitur Transfer Bank dinonaktifkan oleh kasir. Pembayaran otomatis dialihkan ke Cash / Tunai.', 'warning');
+        return;
+      }
+
+      const deliveryAddress = currentUser.address.trim();
+
+      const submitBtn = document.getElementById('btnSubmitCheckout');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> Menyimpan Pesanan...`;
+      }
+
+      const subtotal = cart.reduce((sum, item) => sum + ((Number(item.sellPrice) || 0) * item.qty), 0);
+      const ongkir = (selectedDelivery === 'antar') ? (shippingConfig.status ? shippingConfig.tarif : 0) : 0;
+      const grandTotal = subtotal + ongkir;
+      const orderId = 'ORD-' + Date.now();
+      const notes = (document.getElementById('inputOrderNotes')?.value || '').trim();
+
+      // Dokumen pesanan Firestore
+      const orderData = {
+        orderId: orderId,
+        storeId: currentStoreId,
+        cashierId: currentCashierId,
+        customerName: currentUser.name,
+        customerPhone: currentUser.phone,
+        customerWhatsapp: currentUser.phone,
+        customerAddress: deliveryAddress,
+        items: cart.map(it => {
+          const price = Number(it.sellPrice) || 0;
+          const itemName = it.name || it.nama;
+          return {
+            id: it.id,
+            nama: itemName,
+            name: itemName,
+            sellPrice: price,
+            hargaJual: price,
+            kategori: it.kategori || 'Umum',
+            imageUrl: it.imageUrl || '',
+            qty: Number(it.qty),
+            subtotal: price * Number(it.qty)
+          };
+        }),
+        subtotal: subtotal,
+        ongkir: ongkir,
+        shippingCost: ongkir,
+        isFreeShipping: (selectedDelivery === 'antar' && !shippingConfig.status),
+        shippingConfigSnapshot: {
+          status: shippingConfig.status,
+          tarif: shippingConfig.tarif
+        },
+        grandTotal: grandTotal,
+        totalBill: grandTotal,
+        deliveryMethod: selectedDelivery, // 'antar' | 'ambil'
+        deliveryAddress: selectedDelivery === 'antar' ? deliveryAddress : 'Ambil di Toko',
+        paymentMethod: selectedPayment, // 'cash' | 'transfer'
+        status: "Pending", // Status awal "Pending"
+        notes: notes,
+        paymentProofUrl: "",
+        createdAt: db ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString(),
+        timestamp: Date.now()
+      };
+
+      try {
+        // 1. Simpan dokumen pesanan baru ke Firestore
+        await saveOrderToFirestore(orderData);
+
+        // 2. Bersihkan keranjang belanja
+        cart = [];
+        saveCartToStorage();
+        updateCartBadges();
+        renderCartDrawer();
+
+        // 3. Fetch ulang katalog produk segar
+        await fetchFreshProductsFromFirestore();
+
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<span>Proses Pesanan Sekarang</span><i data-lucide="check" class="w-4 h-4"></i>`;
+          lucide.createIcons();
+        }
+
+        // JIKA METODE PEMBAYARAN "TRANSFER": Tampilkan modal upload bukti transfer Base64 & countdown 20 menit
+        if (selectedPayment === 'transfer') {
+          activePendingOrder = orderData;
+          localStorage.setItem('fortapos_active_transfer_order', JSON.stringify(orderData));
+
+          toggleCartDrawer(false);
+          openTransferConfirmationModal(orderData);
+          return;
+        }
+
+        // JIKA PEMBAYARAN "CASH / TUNAI": Langsung alihkan ke tab Pesanan Saya dengan status tracking
+        toggleCartDrawer(false);
+        toggleCustomerViewTab('orders');
+
+        showCustomAlert(
+          'Pesanan Berhasil Dibuat!',
+          `Pesanan Anda (${orderId}) dengan metode pembayaran Cash/Tunai telah berhasil disimpan ke sistem toko. Pantau status pelacakan pesanan Anda secara real-time pada tab Pesanan Saya ini.`,
+          'success'
+        );
+
+      } catch(err) {
+        console.error("Gagal menyimpan pesanan ke Firestore:", err);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<span>Proses Pesanan Sekarang</span><i data-lucide="check" class="w-4 h-4"></i>`;
+          lucide.createIcons();
+        }
+        showCustomAlert('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan pesanan ke Firestore. Mohon periksa koneksi internet Anda.', 'danger');
+      }
+    }
+
+    async function saveOrderToFirestore(order) {
+      if (db) {
+        await db.collection('stores')
+          .doc(currentStoreId)
+          .collection('online_orders')
+          .doc(order.orderId)
+          .set(order);
+      }
+      const cacheKey = 'fortapos_orders_' + currentStoreId;
+      try {
+        const localList = JSON.parse(localStorage.getItem(cacheKey)) || [];
+        localList.unshift(order);
+        localStorage.setItem(cacheKey, JSON.stringify(localList));
+      } catch(e) {}
+    }
+
+    // ========================================================
+    // 10. MODAL TRANSFER BANK & FOTO BUKTI BASE64 KE DATABASE
+    // ========================================================
+    function openTransferConfirmationModal(order) {
+      const modal = document.getElementById('transferConfirmModal');
+      const amountEl = document.getElementById('transferAmountRequired');
+      const bankNameEl = document.getElementById('bankNameDisplay');
+      const bankAccEl = document.getElementById('bankAccountDisplay');
+      const bankHolderEl = document.getElementById('bankHolderDisplay');
+
+      if (!modal) return;
+
+      if (amountEl) amountEl.textContent = formatRupiah(order.grandTotal);
+      if (bankNameEl) bankNameEl.textContent = storeBankInfo.bankName;
+      if (bankAccEl) bankAccEl.textContent = storeBankInfo.accountNumber;
+      if (bankHolderEl) bankHolderEl.textContent = 'a/n ' + storeBankInfo.accountHolder;
+
+      clearProofImage();
+
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+
+      const now = Date.now();
+      const expiresAt = order.expiresAt || (order.timestamp + (20 * 60 * 1000));
+      const remainingMs = Math.max(0, expiresAt - now);
+      countdownSeconds = Math.floor(remainingMs / 1000);
+
+      startCountdownTimer();
+    }
+
+    function closeTransferModal() {
+      const modal = document.getElementById('transferConfirmModal');
+      if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
+      if (countdownInterval) clearInterval(countdownInterval);
+    }
+
+    function startCountdownTimer() {
+      if (countdownInterval) clearInterval(countdownInterval);
+      updateCountdownDisplay();
+
+      countdownInterval = setInterval(() => {
+        countdownSeconds -= 1;
+        updateCountdownDisplay();
+
+        if (countdownSeconds <= 0) {
+          clearInterval(countdownInterval);
+          handleTransferExpired();
+        }
+      }, 1000);
+    }
+
+    function updateCountdownDisplay() {
+      const display = document.getElementById('transferCountdownDisplay');
+      if (!display) return;
+
+      const m = Math.floor(countdownSeconds / 60);
+      const s = countdownSeconds % 60;
+      display.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    async function handleTransferExpired() {
+      closeTransferModal();
+
+      if (activePendingOrder) {
+        const orderId = activePendingOrder.orderId;
+
+        if (db) {
+          try {
+            await db.collection('stores')
+              .doc(currentStoreId)
+              .collection('online_orders')
+              .doc(orderId)
+              .update({
+                status: 'expired',
+                expiredAt: firebase.firestore.FieldValue.serverTimestamp()
+              });
+          } catch(e) {}
+        }
+
+        await fetchFreshProductsFromFirestore();
+
+        localStorage.removeItem('fortapos_active_transfer_order');
+        activePendingOrder = null;
+
+        showCustomAlert(
+          'Waktu Pembayaran Habis (20 Menit)',
+          'Batas waktu transfer 20 menit telah terlewati. Pesanan otomatis kedaluwarsa.',
+          'danger'
+        );
+      }
+    }
+
+    async function handleCancelTransferOrder(confirmUser) {
+      if (confirmUser) {
+        const yes = confirm("Apakah Anda yakin ingin membatalkan transaksi ini?");
+        if (!yes) return;
+      }
+
+      closeTransferModal();
+
+      if (activePendingOrder) {
+        const orderId = activePendingOrder.orderId;
+
+        if (db) {
+          try {
+            await db.collection('stores')
+              .doc(currentStoreId)
+              .collection('online_orders')
+              .doc(orderId)
+              .update({
+                status: 'cancelled',
+                cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+              });
+          } catch(e) {}
+        }
+
+        await fetchFreshProductsFromFirestore();
+
+        localStorage.removeItem('fortapos_active_transfer_order');
+        activePendingOrder = null;
+
+        showCustomAlert(
+          'Pesanan Dibatalkan',
+          'Pesanan telah dibatalkan.',
+          'info'
+        );
+      }
+    }
+
+    function checkExistingPendingTransfer() {
+      try {
+        const raw = localStorage.getItem('fortapos_active_transfer_order');
+        if (raw) {
+          const order = JSON.parse(raw);
+          const now = Date.now();
+          const expiresAt = order.expiresAt || (order.timestamp + (20 * 60 * 1000));
+          if (order.status === 'Pending' && expiresAt > now) {
+            activePendingOrder = order;
+          } else {
+            localStorage.removeItem('fortapos_active_transfer_order');
+          }
+        }
+      } catch(e) {}
+    }
+
+    function triggerFileInput() {
+      if (isCloudinaryUploading) return;
+      const input = document.getElementById('proofFileInput');
+      if (input) input.click();
+    }
+
+    async function handleProofImageSelected(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      if (!file.type.startsWith('image/')) {
+        showCustomAlert('File Tidak Sesuai', 'Mohon pilih file foto gambar (JPG, PNG, atau WEBP).', 'warning');
+        return;
+      }
+
+      const placeholder = document.getElementById('proofPlaceholder');
+      const previewContainer = document.getElementById('proofImagePreviewContainer');
+      const previewImg = document.getElementById('proofPreviewImg');
+      const fileNameEl = document.getElementById('proofFileName');
+      const spinner = document.getElementById('proofUploadSpinner');
+      const btnSubmit = document.getElementById('btnSubmitProof');
+
+      // Tampilkan kontainer preview & preview instan lokal
+      if (placeholder) placeholder.classList.add('hidden');
+      if (previewContainer) previewContainer.classList.remove('hidden');
+      if (previewImg) previewImg.src = URL.createObjectURL(file);
+      if (fileNameEl) fileNameEl.textContent = `${file.name} (Mengunggah ke Cloudinary...)`;
+      if (spinner) spinner.classList.remove('hidden');
+
+      if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> Mengunggah ke Cloudinary...`;
+      }
+
+      isCloudinaryUploading = true;
+      uploadedProofUrl = '';
+
+      pendingCloudinaryUploadPromise = uploadFileToCloudinary(file);
+
+      try {
+        const optimizedUrl = await pendingCloudinaryUploadPromise;
+        uploadedProofUrl = optimizedUrl;
+
+        // Tampilkan gambar optimizedUrl di preview foto
+        if (previewImg) previewImg.src = optimizedUrl;
+        if (fileNameEl) fileNameEl.textContent = `${file.name} (Cloudinary dioptimalkan)`;
+
+      } catch(err) {
+        console.error("Cloudinary upload error:", err);
+        clearProofImage();
+        showCustomAlert('Gagal Mengunggah', 'Gagal mengunggah foto ke Cloudinary: ' + (err.message || 'Koneksi bermasalah') + '. Silakan coba pilih foto kembali.', 'danger');
+      } finally {
+        isCloudinaryUploading = false;
+        pendingCloudinaryUploadPromise = null;
+        if (spinner) spinner.classList.add('hidden');
+        if (btnSubmit) {
+          btnSubmit.disabled = false;
+          btnSubmit.innerHTML = `<i data-lucide="send" class="w-4 h-4"></i><span>Kirim Bukti Pembayaran</span>`;
+          lucide.createIcons();
+        }
+      }
+    }
+
+    // FUNGSI ASINKRONUS MENGUNGGAH FILE FISIK KE REST API CLOUDINARY
+    async function uploadFileToCloudinary(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+      const response = await fetch(CLOUDINARY_UPLOAD_URL, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        let errMsg = `Upload HTTP ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson?.error?.message) {
+            errMsg = errJson.error.message;
+          }
+        } catch(e) {}
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      const originalUrl = data.secure_url || data.url;
+      if (!originalUrl) {
+        throw new Error("URL Cloudinary tidak ditemukan dalam respon API.");
+      }
+
+      // Kompresi cloud otomatis dengan manipulasi string URL Cloudinary
+      let optimizedUrl = originalUrl.replace("/upload/", "/upload/w_1000,c_scale,q_auto,f_auto/");
+      return optimizedUrl;
+    }
+
+    function clearProofImage(event) {
+      if (event) event.stopPropagation();
+      uploadedProofUrl = '';
+      isCloudinaryUploading = false;
+      pendingCloudinaryUploadPromise = null;
+      const input = document.getElementById('proofFileInput');
+      if (input) input.value = '';
+
+      const placeholder = document.getElementById('proofPlaceholder');
+      const previewContainer = document.getElementById('proofImagePreviewContainer');
+      const previewImg = document.getElementById('proofPreviewImg');
+      const spinner = document.getElementById('proofUploadSpinner');
+      const btnSubmit = document.getElementById('btnSubmitProof');
+
+      if (placeholder) placeholder.classList.remove('hidden');
+      if (previewContainer) previewContainer.classList.add('hidden');
+      if (previewImg) previewImg.src = '';
+      if (spinner) spinner.classList.add('hidden');
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.innerHTML = `<i data-lucide="send" class="w-4 h-4"></i><span>Kirim Bukti Pembayaran</span>`;
+        lucide.createIcons();
+      }
+    }
+
+    async function handleProofUploadSubmit() {
+      // Jika upload masih berlangsung, tunggu hingga selesai
+      if (isCloudinaryUploading && pendingCloudinaryUploadPromise) {
+        try {
+          await pendingCloudinaryUploadPromise;
+        } catch(e) {
+          return;
+        }
+      }
+
+      if (!uploadedProofUrl) {
+        showCustomAlert('Bukti Belum Dipilih', 'Mohon pilih foto bukti transfer dan tunggu proses unggah ke cloud selesai.', 'warning');
+        return;
+      }
+
+      if (!activePendingOrder) {
+        showCustomAlert('Kesalahan', 'Data pesanan aktif tidak ditemukan.', 'danger');
+        return;
+      }
+
+      const btn = document.getElementById('btnSubmitProof');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span> Menyimpan Bukti ke Sistem...`;
+      }
+
+      const orderId = activePendingOrder.orderId;
+
+      try {
+        if (db) {
+          // Kirim 'optimizedUrl' (link teks pendek) ke Firestore
+          await db.collection('stores')
+            .doc(currentStoreId)
+            .collection('online_orders')
+            .doc(orderId)
+            .update({
+              paymentProofUrl: uploadedProofUrl,
+              status: "Pending",
+              proofUploadedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        if (countdownInterval) clearInterval(countdownInterval);
+        localStorage.removeItem('fortapos_active_transfer_order');
+        activePendingOrder = null;
+        uploadedProofUrl = '';
+
+        closeTransferModal();
+        toggleCustomerViewTab('orders');
+
+        showCustomAlert(
+          'Bukti Transfer Terkirim',
+          'Bukti pembayaran berhasil diunggah ke cloud dan disimpan ke pesanan Anda. Kasir toko akan segera memverifikasi transaksi.',
+          'success'
+        );
+
+      } catch(err) {
+        console.error("Gagal update bukti transfer:", err);
+        showCustomAlert('Gagal Menyimpan', 'Terjadi kesalahan jaringan saat menyimpan data bukti ke Firestore.', 'danger');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<i data-lucide="send" class="w-4 h-4"></i><span>Kirim Bukti Pembayaran</span>`;
+          lucide.createIcons();
+        }
+      }
+    }
+
+    function openTransferModalForOrder(orderId) {
+      const order = myOrdersList.find(o => o.orderId === orderId);
+      if (!order) return;
+      activePendingOrder = order;
+      openTransferConfirmationModal(order);
+    }
+
+    function previewProofModalImage(orderId) {
+      const order = myOrdersList.find(o => o.orderId === orderId);
+      if (!order || !order.paymentProofUrl) return;
+      const modal = document.getElementById('proofPreviewModal');
+      const img = document.getElementById('modalProofImgDisplay');
+      if (img) img.src = order.paymentProofUrl;
+      if (modal) modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeProofPreviewModal() {
+      const modal = document.getElementById('proofPreviewModal');
+      if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function copyBankAccount() {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(storeBankInfo.accountNumber).then(() => {
+          showCustomAlert('Berhasil Disalin', `Nomor rekening ${storeBankInfo.accountNumber} telah disalin ke clipboard.`, 'success');
+        }).catch(() => {
+          prompt('Salin nomor rekening:', storeBankInfo.accountNumber);
+        });
+      } else {
+        prompt('Salin nomor rekening:', storeBankInfo.accountNumber);
+      }
+    }
+
+    // ========================================================
+    // 11. LISTENER REAL-TIME PESANAN SAYA
+    // ========================================================
+    function initCustomerOrdersListener() {
+      if (unsubscribeMyOrders) {
+        unsubscribeMyOrders();
+        unsubscribeMyOrders = null;
+      }
+
+      const activePhone = queriedPhoneOverride || (currentUser ? currentUser.phone : '');
+      if (!activePhone) {
+        myOrdersList = [];
+        renderCustomerOrders();
+        updateOrdersBadge();
+        return;
+      }
+
+      if (!db) {
+        console.warn("Firestore belum siap untuk query pesanan");
+        return;
+      }
+
+      try {
+        const ordersCol = db.collection('stores')
+          .doc(currentStoreId)
+          .collection('online_orders');
+
+        unsubscribeMyOrders = ordersCol.onSnapshot((snapshot) => {
+          const list = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const orderPhone = normalizePhone(data.customerPhone || data.customerWhatsapp || '');
+            if (orderPhone === activePhone) {
+              list.push({
+                ...data,
+                orderId: data.orderId || doc.id,
+                timestamp: data.timestamp || (data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : Date.now())
+              });
+            }
+          });
+
+          list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          myOrdersList = list;
+
+          renderCustomerOrders();
+          updateOrdersBadge();
+
+        }, (error) => {
+          console.error("Error reading online_orders:", error);
+        });
+
+      } catch(err) {
+        console.error("Exception in initCustomerOrdersListener:", err);
+      }
+    }
+
+    function updateOrdersBadge() {
+      const totalCount = myOrdersList.length;
+      const headerBadge = document.getElementById('myOrdersHeaderBadge');
+      const tabBadge = document.getElementById('tabOrdersBadge');
+
+      if (headerBadge) {
+        headerBadge.textContent = totalCount;
+        if (totalCount > 0) headerBadge.classList.remove('hidden');
+        else headerBadge.classList.add('hidden');
+      }
+
+      if (tabBadge) {
+        tabBadge.textContent = totalCount;
+        if (totalCount > 0) tabBadge.classList.remove('hidden');
+        else tabBadge.classList.add('hidden');
+      }
+
+      const countAll = document.getElementById('countOrderAll');
+      const countPend = document.getElementById('countOrderPending');
+      const countProc = document.getElementById('countOrderProcess');
+      const countVer = document.getElementById('countOrderVerified');
+      const countExp = document.getElementById('countOrderExpired');
+
+      if (countAll) countAll.textContent = myOrdersList.length;
+      if (countPend) countPend.textContent = myOrdersList.filter(o => (o.status || '').toLowerCase() === 'pending').length;
+      if (countProc) countProc.textContent = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s.includes('menyiapkan') || s.includes('kirim') || s.includes('datang') || s === 'processing';
+      }).length;
+      if (countVer) countVer.textContent = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'verified' || s === 'selesai' || s === 'completed';
+      }).length;
+      if (countExp) countExp.textContent = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'expired' || s === 'cancelled' || s === 'batal';
+      }).length;
+    }
+
+    function setOrdersFilter(status) {
+      activeOrderFilter = status;
+      const buttons = ['All', 'Pending', 'Process', 'Verified', 'Expired'];
+      buttons.forEach(b => {
+        const btn = document.getElementById('btnFilterOrder' + b);
+        if (btn) {
+          if (b.toLowerCase() === status.toLowerCase()) {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-[#4f46e5] text-white shadow-xs cursor-pointer';
+          } else {
+            btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer';
+          }
+        }
+      });
+      renderCustomerOrders();
+    }
+
+    // ========================================================
+    // LOGIKA STATUS TRACKING PESANAN CASH vs TRANSFER
+    // ========================================================
+    function renderOrderTrackingBox(order) {
+      const isCash = (order.paymentMethod === 'cash' || !order.paymentMethod);
+      const delivery = order.deliveryMethod || 'antar';
+      const statusRaw = (order.status || 'Pending').trim();
+      const statusLower = statusRaw.toLowerCase();
+      const grandTotalFormatted = formatRupiah(order.grandTotal || order.totalBill || 0);
+
+      // KASUS C: PEMBAYARAN TRANSFER
+      if (!isCash) {
+        const hasProof = Boolean(order.paymentProofUrl);
+        const isVerified = (statusLower === 'verified' || statusLower === 'completed' || statusLower === 'selesai');
+        const isPending = (statusLower === 'pending');
+        const isExpired = (statusLower === 'expired');
+
+        if (isPending) {
+          if (hasProof) {
+            return `
+              <div class="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600 shrink-0"></i>
+                  <span>Bukti transfer tersimpan di Cloud. Menunggu kasir memverifikasi pesanan Anda.</span>
+                </div>
+                <button onclick="previewProofModalImage('${order.orderId}')" class="px-2.5 py-1 bg-white border border-amber-200 hover:bg-amber-100 text-amber-800 rounded-lg text-[11px] font-semibold flex items-center gap-1 shrink-0 cursor-pointer">
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                  <span>Lihat Bukti Foto</span>
+                </button>
+              </div>
+            `;
+          } else {
+            return `
+              <div class="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <span class="font-bold flex items-center gap-1 text-[#f59e0b]">
+                    <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                    <span>Menunggu Pembayaran Transfer:</span>
+                  </span>
+                </div>
+                <p class="text-[11px] text-amber-800">
+                  Transfer ke rekening BCA ${storeBankInfo.accountNumber} dan unggah foto bukti transfer Anda.
+                </p>
+                <div class="flex items-center gap-2 flex-wrap pt-1">
+                  <button onclick="openTransferModalForOrder('${order.orderId}')" class="px-3 py-1.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer">
+                    <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i>
+                    <span>Unggah Bukti Transfer Sekarang</span>
+                  </button>
+                  <button onclick="cancelPendingOrderFromList('${order.orderId}')" class="px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium cursor-pointer">
+                    Batalkan
+                  </button>
+                </div>
+              </div>
+            `;
+          }
+        }
+
+        if (isVerified) {
+          return `
+            <div class="p-3.5 bg-slate-950 text-white border border-slate-900 rounded-xl space-y-1 shadow-sm">
+              <div class="flex items-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+                <span class="font-bold text-sm text-white">Pesanan Selesai (Transfer Terverifikasi)</span>
+              </div>
+              <p class="text-xs text-slate-200">
+                Pembayaran transfer telah diverifikasi dan pesanan telah diproses oleh kasir.
+              </p>
+              <p class="text-xs text-slate-400 italic pt-0.5">
+                Terimakasih sudah berbelanja di toko kami, senang kami bisa melayani anda
+              </p>
+            </div>
+          `;
+        }
+
+        if (isExpired) {
+          return `
+            <div class="p-3 bg-red-50/80 border border-red-200 rounded-xl text-xs text-red-800 flex items-center gap-2">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-[#ef4444] shrink-0"></i>
+              <span>Batas waktu 20 menit berakhir sebelum bukti transfer diunggah. Pesanan kedaluwarsa.</span>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+            Status Pesanan: <strong>${escapeHtml(order.status)}</strong>
+          </div>
+        `;
+      }
+
+      // ========================================================
+      // KASUS A & B: PEMBAYARAN CASH / TUNAI
+      // ========================================================
+      const isPending = (statusLower === 'pending');
+      const isPreparing = (statusLower.includes('menyiapkan') || statusLower === 'processing' || statusLower === 'preparing');
+      const isDelivering = (statusLower.includes('kirim') || statusLower.includes('antar') || statusLower === 'shipping' || statusLower === 'delivering');
+      const isReadyPickup = (statusLower.includes('menunggu pelanggan') || statusLower.includes('datang') || statusLower.includes('siap diambil') || statusLower === 'ready');
+      const isVerified = (statusLower === 'verified' || statusLower === 'selesai' || statusLower === 'completed');
+
+      // A. JIKA METODE "ANTAR" & PEMBAYARAN "CASH":
+      if (delivery === 'antar') {
+        // 1. Status awal (Pending)
+        if (isPending) {
+          return `
+            <div class="p-3.5 bg-slate-100/90 border border-slate-300 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+                <span class="font-bold text-xs text-slate-800">pending (tunggu penjual menerima pesanan)</span>
+              </div>
+              <p class="text-xs text-slate-600 pl-4.5">
+                siapkan uang sebesar <strong class="text-slate-900 font-mono">${grandTotalFormatted}</strong>, pesanan anda akan segera di siapkan
+              </p>
+            </div>
+          `;
+        }
+
+        // 2. Status "Menyiapkan Barang": Teks warna biru
+        if (isPreparing) {
+          return `
+            <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse shrink-0"></span>
+                <span class="font-bold text-xs text-blue-700">Penjual menerima pesanan dan sedang menyiapkan barang pesanan anda</span>
+              </div>
+              <p class="text-xs text-blue-600 pl-4.5">
+                Tunggu sebentar ya... barang pesanan anda akan segera kami siapkan
+              </p>
+            </div>
+          `;
+        }
+
+        // 3. Status "Segera Kirimkan Barang": Teks warna hijau
+        if (isDelivering) {
+          return `
+            <div class="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0"></span>
+                <span class="font-extrabold text-xs text-emerald-800 tracking-wide uppercase">PENJUAL SEDANG MENGIRIMKAN PESANAN ANDA</span>
+              </div>
+              <p class="text-xs text-emerald-800 pl-4.5">
+                Siapkan uang sebesar <strong class="text-emerald-950 font-mono">${grandTotalFormatted}</strong>, barang pesanan anda akan segera tiba
+              </p>
+            </div>
+          `;
+        }
+
+        // 4. Status "Verified" (Selesai): Desain kolom dan tulisan berubah menjadi warna HITAM
+        if (isVerified) {
+          return `
+            <div class="p-4 bg-black text-white border border-slate-900 rounded-xl space-y-1.5 shadow-md">
+              <div class="flex items-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+                <span class="font-bold text-sm text-white">Pesanan Selesai</span>
+              </div>
+              <p class="text-xs text-slate-200">
+                Barang pesanan anda sudah di antarkan, Pesanan ini sudah selesai ya... 👌
+              </p>
+              <p class="text-xs text-slate-400 italic pt-0.5">
+                Terimakasih sudah berbelanja di toko kami, senang kami bisa melayani anda
+              </p>
+            </div>
+          `;
+        }
+      }
+
+      // B. JIKA METODE "AMBIL DI TOKO" & PEMBAYARAN "CASH":
+      if (delivery === 'ambil') {
+        // 1. Status awal (Pending)
+        if (isPending) {
+          return `
+            <div class="p-3.5 bg-slate-100/90 border border-slate-300 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+                <span class="font-bold text-xs text-slate-800">pending (tunggu penjual menerima pesanan)</span>
+              </div>
+              <p class="text-xs text-slate-600 pl-4.5">
+                siapkan uang sebesar <strong class="text-slate-900 font-mono">${grandTotalFormatted}</strong>, pesanan anda akan segera di siapkan
+              </p>
+            </div>
+          `;
+        }
+
+        // 2. Status "Menyiapkan Barang": Teks warna biru
+        if (isPreparing) {
+          return `
+            <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse shrink-0"></span>
+                <span class="font-bold text-xs text-blue-700">Penjual menerima pesanan dan sedang menyiapkan barang pesanan anda</span>
+              </div>
+              <p class="text-xs text-blue-600 pl-4.5">
+                Tunggu sebentar ya... barang pesanan anda akan segera kami siapkan
+              </p>
+            </div>
+          `;
+        }
+
+        // 3. Status "Menunggu Pelanggan Datang": Teks warna hijau
+        if (isReadyPickup || isDelivering) {
+          return `
+            <div class="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                <span class="font-extrabold text-xs text-emerald-800 tracking-wide uppercase">BARANG PESANAN ANDA SUDAH SIAP UNTUK DIAMBIL</span>
+              </div>
+              <p class="text-xs text-emerald-800 pl-4.5">
+                Barang pesanan anda sudah siap untuk di ambil, siapkan uang sebesar <strong class="text-emerald-950 font-mono">${grandTotalFormatted}</strong> untuk melakukan pembayaran di Toko
+              </p>
+            </div>
+          `;
+        }
+
+        // 4. Status "Verified" (Selesai): Desain kolom dan tulisan berubah menjadi warna HITAM
+        if (isVerified) {
+          return `
+            <div class="p-4 bg-black text-white border border-slate-900 rounded-xl space-y-1.5 shadow-md">
+              <div class="flex items-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+                <span class="font-bold text-sm text-white">Pesanan Selesai</span>
+              </div>
+              <p class="text-xs text-slate-200">
+                Barang pesanan anda sudah ambil di toko, Pesanan ini sudah selesai ya... 👌
+              </p>
+              <p class="text-xs text-slate-400 italic pt-0.5">
+                Terimakasih sudah berbelanja di toko kami, senang kami bisa melayani anda
+              </p>
+            </div>
+          `;
+        }
+      }
+
+      // Default fallback
+      return `
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+          Status: <strong>${escapeHtml(order.status)}</strong>
+        </div>
+      `;
+    }
+
+    function renderCustomerOrders() {
+      const container = document.getElementById('ordersContainer');
+      if (!container) return;
+
+      const activePhone = queriedPhoneOverride || (currentUser ? currentUser.phone : '');
+      if (!activePhone) {
+        container.innerHTML = `
+          <div class="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
+            <i data-lucide="phone" class="w-10 h-10 mx-auto text-slate-300 mb-2"></i>
+            <h4 class="text-sm font-bold text-slate-800 mb-1">Masukkan Nomor WhatsApp</h4>
+            <p class="text-xs text-slate-500 max-w-sm mx-auto mb-3">
+              Silakan lengkapi nomor WhatsApp Anda untuk menampilkan riwayat pesanan secara real-time.
+            </p>
+            <button onclick="showRegistrationModal(true)" class="px-4 py-2 bg-[#4f46e5] text-white rounded-xl text-xs font-bold hover:bg-[#4338ca] transition-colors inline-flex items-center gap-1.5 cursor-pointer">
+              <span>Masuk dengan Nomor WhatsApp</span>
+            </button>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      let filtered = myOrdersList;
+      const st = activeOrderFilter.toLowerCase();
+      if (st === 'pending') filtered = myOrdersList.filter(o => (o.status || '').toLowerCase() === 'pending');
+      else if (st === 'process') filtered = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s.includes('menyiapkan') || s.includes('kirim') || s.includes('datang') || s === 'processing';
+      });
+      else if (st === 'verified') filtered = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'verified' || s === 'completed' || s === 'selesai';
+      });
+      else if (st === 'expired') filtered = myOrdersList.filter(o => {
+        const s = (o.status || '').toLowerCase();
+        return s === 'expired' || s === 'cancelled' || s === 'batal';
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
+            <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-300">
+              <i data-lucide="receipt" class="w-6 h-6"></i>
+            </div>
+            <h4 class="text-sm font-bold text-slate-800 mb-1">Belum Ada Pesanan Ditemukan</h4>
+            <p class="text-xs text-slate-500 max-w-sm mx-auto mb-4">
+              Tidak ada pesanan untuk nomor WhatsApp <strong>${escapeHtml(activePhone)}</strong> pada filter ini.
+            </p>
+            <button onclick="toggleCustomerViewTab('catalog')" class="px-4 py-2 bg-[#4f46e5] text-white rounded-xl text-xs font-bold hover:bg-[#4338ca] transition-colors inline-flex items-center gap-1.5 shadow-xs cursor-pointer">
+              <span>Mulai Belanja di Katalog</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      let html = '';
+      filtered.forEach(order => {
+        const orderStatus = (order.status || 'Pending').toLowerCase();
+        const isVerified = (orderStatus === 'verified' || orderStatus === 'selesai' || orderStatus === 'completed');
+        const isCash = (order.paymentMethod === 'cash' || !order.paymentMethod);
+        const orderDateStr = order.timestamp ? new Date(order.timestamp).toLocaleString('id-ID', {
+          day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        }) : '-';
+
+        const orderOngkir = Number(order.ongkir || 0);
+
+        // Jika pesanan cash verified, card luar juga diberi sentuhan sleek border hitam
+        const cardClass = (isCash && isVerified)
+          ? 'bg-white rounded-2xl border-2 border-black p-4 shadow-sm hover:shadow-md transition-all'
+          : 'bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs hover:shadow-md transition-all';
+
+        html += `
+          <div class="${cardClass}">
+            <!-- Header Card -->
+            <div class="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-slate-100">
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-mono font-bold text-xs text-slate-900">${order.orderId}</span>
+                  <span class="text-[11px] text-slate-400">·</span>
+                  <span class="text-[11px] text-slate-500">${orderDateStr}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono font-medium" title="Penanggung jawab pesanan">Kasir: ${escapeHtml(order.cashierId || 'owner')}</span>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-slate-600 mt-1 flex-wrap">
+                  <span class="font-medium flex items-center gap-1">
+                    <i data-lucide="${order.deliveryMethod === 'antar' ? 'truck' : 'store'}" class="w-3.5 h-3.5 text-[#4f46e5]"></i>
+                    <span>${order.deliveryMethod === 'antar' ? (orderOngkir === 0 ? 'Belanja Diantar (Gratis Ongkir)' : 'Belanja Diantar') : 'Ambil di Toko'}</span>
+                  </span>
+                  <span>·</span>
+                  <span class="flex items-center gap-1">
+                    <i data-lucide="${order.paymentMethod === 'transfer' ? 'credit-card' : 'banknote'}" class="w-3.5 h-3.5 text-slate-400"></i>
+                    <span class="font-bold ${order.paymentMethod === 'transfer' ? 'text-indigo-600' : 'text-emerald-700'}">${order.paymentMethod === 'transfer' ? 'Transfer Bank' : 'Cash / Tunai'}</span>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Status Badge Atas -->
+              <div>
+                ${(isCash && isVerified) ? `
+                  <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-black text-white border border-black flex items-center gap-1.5 shadow-2xs">
+                    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>
+                    <span>Pesanan Selesai</span>
+                  </span>
+                ` : `
+                  <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                    Status: ${escapeHtml(order.status || 'Pending')}
+                  </span>
+                `}
+              </div>
+            </div>
+
+            <!-- Kotak Pelacakan Status Real-Time -->
+            <div class="my-3">
+              ${renderOrderTrackingBox(order)}
+            </div>
+
+            <!-- Alamat Pengiriman Pesanan -->
+            ${order.deliveryMethod === 'antar' ? `
+              <div class="text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded-xl mb-2 flex items-start gap-1.5">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-[#4f46e5] shrink-0 mt-0.5"></i>
+                <div class="min-w-0">
+                  <span class="font-semibold text-slate-700">Alamat Pengiriman: </span>
+                  <span class="text-slate-800 break-words">${escapeHtml(order.customerAddress || order.deliveryAddress || currentUser?.address || '-')}</span>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Items list & Rincian Biaya Belanja (Vertikal Stacked) -->
+            <div class="pt-1 text-xs text-slate-600">
+              <div class="bg-slate-50/80 rounded-xl p-3 border border-slate-100 space-y-2">
+                <!-- Daftar Item Belanja -->
+                <div class="space-y-1.5">
+                  ${(order.items || []).map(it => {
+                    const itemPrice = Number(it.sellPrice !== undefined ? it.sellPrice : (it.hargaJual || 0));
+                    const itemName = it.name || it.nama || 'Produk';
+                    return `
+                      <div class="flex justify-between items-center text-xs">
+                        <div class="min-w-0 pr-2 truncate">
+                          <span class="font-bold text-slate-800">${it.qty}x</span>
+                          <span class="text-slate-700 ml-1.5">${escapeHtml(itemName)}</span>
+                        </div>
+                        <span class="font-mono text-slate-600 tabular-nums shrink-0">${formatRupiah(itemPrice * it.qty)}</span>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+
+                <!-- Pemisah Garis Rincian Biaya (Vertikal Stacked) -->
+                <div class="pt-2.5 border-t border-slate-200 space-y-1.5">
+                  <!-- Baris 1 (Atas): Subtotal -->
+                  <div class="flex justify-between items-center text-xs text-slate-600">
+                    <span class="font-medium text-slate-500">Subtotal</span>
+                    <span class="font-mono text-slate-800 font-semibold tabular-nums">${formatRupiah(order.subtotal !== undefined ? order.subtotal : ((order.grandTotal || order.totalBill || 0) - orderOngkir))}</span>
+                  </div>
+
+                  <!-- Baris 2 (Bawah): Ongkos Kirim -->
+                  <div class="flex justify-between items-center text-xs text-slate-600">
+                    <span class="font-medium text-slate-500">Ongkos Kirim</span>
+                    <span class="font-mono tabular-nums ${orderOngkir === 0 ? 'text-emerald-600 font-bold' : 'text-slate-800 font-semibold'}">
+                      ${orderOngkir === 0 ? 'Gratis' : formatRupiah(orderOngkir)}
+                    </span>
+                  </div>
+
+                  <!-- Baris 3 (Paling Bawah): Total Pembayaran / Grand Total -->
+                  <div class="pt-2 border-t border-slate-200 flex justify-between items-center">
+                    <span class="text-xs sm:text-sm font-bold text-slate-900">Total Pembayaran</span>
+                    <span class="text-sm sm:text-base font-extrabold text-[#4f46e5] font-mono tabular-nums">
+                      ${formatRupiah(order.grandTotal || order.totalBill || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer: Aksi Tombol Cetak Struk & Pesan Lagi -->
+            <div class="pt-3 mt-1 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+              <div class="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <i data-lucide="info" class="w-3.5 h-3.5 text-slate-400"></i>
+                <span>Metode: <strong class="text-slate-700">${order.deliveryMethod === 'antar' ? 'Belanja Diantar' : 'Ambil di Toko'}</strong></span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button onclick="viewOrderThermalReceipt('${order.orderId}')" class="px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer" title="Cetak Format Struk Kasir">
+                  <i data-lucide="printer" class="w-3.5 h-3.5 text-slate-500"></i>
+                  <span>Struk</span>
+                </button>
+                <button onclick="reorderCustomerItems('${order.orderId}')" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-[#4f46e5] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer" title="Beli ulang produk ini">
+                  <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+                  <span>Pesan Lagi</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+      lucide.createIcons();
+    }
+
+    function reorderCustomerItems(orderId) {
+      const order = myOrdersList.find(o => o.orderId === orderId);
+      if (!order || !order.items) return;
+
+      order.items.forEach(it => {
+        const prod = dbProducts.find(p => p.id === it.id);
+        const existing = cart.find(c => c.id === it.id);
+        const addQty = it.qty || 1;
+        const itemName = it.name || it.nama;
+        if (existing) {
+          existing.qty += addQty;
+        } else {
+          cart.push({
+            id: it.id,
+            nama: itemName,
+            name: itemName,
+            sellPrice: Number(it.sellPrice !== undefined ? it.sellPrice : (it.hargaJual || 0)),
+            kategori: it.kategori || 'Umum',
+            imageUrl: it.imageUrl || '',
+            qty: addQty
+          });
+        }
+      });
+
+      saveCartToStorage();
+      renderProducts();
+      renderCartDrawer();
+      updateCartBadges();
+      toggleCartDrawer(true);
+      showCustomAlert('Berhasil Dimasukkan', 'Barang dari pesanan sebelumnya telah dimasukkan kembali ke keranjang belanja Anda.', 'success');
+    }
+
+    async function cancelPendingOrderFromList(orderId) {
+      const ok = confirm("Apakah Anda yakin ingin membatalkan pesanan ini?");
+      if (!ok) return;
+
+      if (db) {
+        try {
+          await db.collection('stores')
+            .doc(currentStoreId)
+            .collection('online_orders')
+            .doc(orderId)
+            .update({
+              status: 'cancelled',
+              cancelledAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          showCustomAlert('Pesanan Dibatalkan', `Pesanan ${orderId} telah dibatalkan.`, 'info');
+        } catch(e) {
+          showCustomAlert('Gagal', 'Terjadi kesalahan saat membatalkan pesanan.', 'danger');
+        }
+      }
+    }
+
+    // ========================================================
+    // 12. FORMAT STRUK THERMAL (CETAK RESMI)
+    // ========================================================
+    function viewOrderThermalReceipt(orderId) {
+      const order = myOrdersList.find(o => o.orderId === orderId);
+      if (!order) return;
+
+      const dateStr = order.timestamp ? new Date(order.timestamp).toLocaleString('id-ID') : new Date().toLocaleString('id-ID');
+      const storeName = currentStoreId.toUpperCase();
+      const cashierName = order.cashierId || 'OWNER';
+      const custName = order.customerName || 'Pelanggan';
+      const custPhone = order.customerPhone || '-';
+      const paymentType = order.paymentMethod === 'transfer' ? 'TRANSFER BANK' : 'CASH / TUNAI';
+      const deliveryType = order.deliveryMethod === 'antar' ? 'BELANJA DIANTAR' : 'AMBIL DI TOKO';
+      const ongkir = Number(order.ongkir || 0);
+
+      let text = '';
+      text += `================================\n`;
+      text += `       FORTAPOS ONLINE STORE    \n`;
+      text += `       ID: ${storeName}         \n`;
+      text += `================================\n`;
+      text += `No. Order : ${order.orderId}\n`;
+      text += `Tanggal   : ${dateStr}\n`;
+      text += `Petugas   : ${cashierName}\n`;
+      text += `Pelanggan : ${custName}\n`;
+      text += `WhatsApp  : ${custPhone}\n`;
+      if (order.deliveryMethod === 'antar' && (order.customerAddress || order.deliveryAddress)) {
+        text += `Alamat    : ${order.customerAddress || order.deliveryAddress}\n`;
+      }
+      text += `Metode    : ${deliveryType}\n`;
+      text += `Bayar     : ${paymentType}\n`;
+      text += `--------------------------------\n`;
+
+      (order.items || []).forEach(it => {
+        const itemPrice = Number(it.sellPrice !== undefined ? it.sellPrice : (it.hargaJual || 0));
+        const lineTotal = itemPrice * it.qty;
+        const itemName = it.name || it.nama || 'Produk';
+        text += `${itemName}\n`;
+        text += `  ${it.qty} x ${formatRupiah(itemPrice)}  = ${formatRupiah(lineTotal)}\n`;
+      });
+
+      text += `--------------------------------\n`;
+      text += `Subtotal  : ${formatRupiah(order.subtotal)}\n`;
+      text += `Ongkir    : ${ongkir === 0 ? 'Gratis' : formatRupiah(ongkir)}\n`;
+      text += `TOTAL     : ${formatRupiah(order.grandTotal || order.totalBill)}\n`;
+      text += `Status    : ${order.status.toUpperCase()}\n`;
+      text += `================================\n`;
+      text += `   Terima Kasih Telah Berbelanja\n`;
+      text += `      Simpan Struk Digital Ini  \n`;
+      text += `================================\n`;
+
+      const contentEl = document.getElementById('receiptModalContent');
+      const modal = document.getElementById('receiptModal');
+      if (contentEl) contentEl.textContent = text;
+      if (modal) modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeReceiptModal() {
+      const modal = document.getElementById('receiptModal');
+      if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+
+    function openConfigModal() {
+      const modal = document.getElementById('configModal');
+      updateShippingUIElements();
+      updateBankPaymentUI();
+      if (modal) modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function closeConfigModal() {
+      const modal = document.getElementById('configModal');
+      if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function showCustomAlert(title, message, type = 'info') {
+      const modal = document.getElementById('customAlertModal');
+      const titleEl = document.getElementById('alertTitle');
+      const messageEl = document.getElementById('alertMessage');
+      const iconContainer = document.getElementById('alertIconContainer');
+
+      if (!modal) {
+        alert(`${title}\n\n${message}`);
+        return;
+      }
+
+      if (titleEl) titleEl.textContent = title;
+      if (messageEl) messageEl.textContent = message;
+
+      if (iconContainer) {
+        if (type === 'success') {
+          iconContainer.className = 'w-12 h-12 rounded-2xl bg-emerald-50 text-[#10b981] flex items-center justify-center mx-auto mb-3 shadow-inner';
+          iconContainer.innerHTML = '<i data-lucide="check-circle-2" class="w-6 h-6"></i>';
+        } else if (type === 'warning') {
+          iconContainer.className = 'w-12 h-12 rounded-2xl bg-amber-50 text-[#f59e0b] flex items-center justify-center mx-auto mb-3 shadow-inner';
+          iconContainer.innerHTML = '<i data-lucide="alert-triangle" class="w-6 h-6"></i>';
+        } else if (type === 'danger') {
+          iconContainer.className = 'w-12 h-12 rounded-2xl bg-red-50 text-[#ef4444] flex items-center justify-center mx-auto mb-3 shadow-inner';
+          iconContainer.innerHTML = '<i data-lucide="alert-circle" class="w-6 h-6"></i>';
+        } else {
+          iconContainer.className = 'w-12 h-12 rounded-2xl bg-indigo-50 text-[#4f46e5] flex items-center justify-center mx-auto mb-3 shadow-inner';
+          iconContainer.innerHTML = '<i data-lucide="info" class="w-6 h-6"></i>';
+        }
+        lucide.createIcons();
+      }
+
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+      modal.querySelector('div').classList.remove('scale-95');
+    }
+
+    function closeAlertModal() {
+      const modal = document.getElementById('customAlertModal');
+      if (!modal) return;
+      modal.classList.add('opacity-0', 'pointer-events-none');
+      modal.querySelector('div').classList.add('scale-95');
+    }
+
+    function formatRupiah(num) {
+      const val = Number(num) || 0;
+      return 'Rp ' + val.toLocaleString('id-ID');
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+
+</body>
+</html>
