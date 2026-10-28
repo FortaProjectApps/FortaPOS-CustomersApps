@@ -157,9 +157,10 @@
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- Firebase SDK v8 (Compat) via CDN -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- Firebase SDK v10.14.1 (Compat) - Selaras 100% dengan FortaPOS Kasir/Owner -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 
   <style>
     body {
@@ -1068,7 +1069,7 @@
           </div>
           <div>
             <h3 class="text-sm font-bold text-slate-900">Status Firestore & Sinkron Kasir</h3>
-            <p class="text-[11px] text-slate-500">Project: kasir-toko-nurjanah</p>
+            <p class="text-[11px] text-slate-500">Project: <span id="cfgFirebaseProjectId">kasir-toko-nurjanah</span></p>
           </div>
         </div>
         <button onclick="closeConfigModal()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
@@ -1081,7 +1082,7 @@
           <label class="block font-bold text-slate-700 mb-1">Status Firestore</label>
           <div id="firebaseConnectionBadge" class="p-2.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[11px] flex items-center gap-2">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span id="firebaseStatusText">Firebase SDK v8 Terinisialisasi (kasir-toko-nurjanah)</span>
+            <span id="firebaseStatusText">Firebase Firestore Real-Time Aktif (kasir-toko-nurjanah)</span>
           </div>
         </div>
 
@@ -1218,10 +1219,10 @@
   <!-- ======================================================== -->
   <script>
     // ========================================================
-    // 1. KONFIGURASI RESMI & INISIALISASI FIREBASE SDK V8 COMPAT
+    // 1. KONFIGURASI RESMI & INISIALISASI FIREBASE SDK COMPAT
+    //    Selaras 100% dengan proyek Firebase pada FortaPOS Kasir
     // ========================================================
-    // DISAMAKAN DENGAN APLIKASI KASIR FORTAPOS-MD (Project ID: kasir-toko-nurjanah)
-    const firebaseConfig = {
+    const defaultFirebaseConfig = {
       apiKey: "AIzaSyDLP4Jnfw1nJYqlY6Y_8ZzcVaLe3QYVyv8",
       authDomain: "kasir-toko-nurjanah.firebaseapp.com",
       projectId: "kasir-toko-nurjanah",
@@ -1230,8 +1231,25 @@
       appId: "1:109452166589:web:6348ce5183c4d41e74bed4"
     };
 
+    function resolveFirebaseConfig() {
+      let active = { ...defaultFirebaseConfig };
+      try {
+        const savedCustomFb = localStorage.getItem('fortapos_custom_firebase_config');
+        if (savedCustomFb) {
+          const parsed = JSON.parse(savedCustomFb);
+          if (parsed && parsed.apiKey && parsed.projectId) {
+            active = parsed;
+          }
+        }
+      } catch (e) {}
+      return active;
+    }
+
+    const firebaseConfig = resolveFirebaseConfig();
     let app = null;
     let db = null;
+    let auth = null;
+    let hasAttemptedAnonAuth = false;
 
     try {
       if (typeof firebase !== 'undefined') {
@@ -1241,69 +1259,133 @@
           app = firebase.app();
         }
         db = firebase.firestore();
-        // Enable persistent cache / settings
-        db.settings({ cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED });
-        console.log("Firebase SDK v8 initialized successfully with project:", firebaseConfig.projectId);
+        try {
+          db.settings({
+            cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED,
+            experimentalAutoDetectLongPolling: true,
+            merge: true
+          });
+        } catch (settingsErr) {
+          console.warn("Firestore settings info:", settingsErr);
+        }
+        if (typeof firebase.auth === 'function') {
+          auth = firebase.auth();
+        }
+        console.log("[FortaPOS Pelanggan] Firebase Firestore aktif pada project:", firebaseConfig.projectId);
       } else {
-        console.warn("Firebase SDK script not loaded yet, running in local fallback mode.");
+        console.warn("Firebase SDK script belum dimuat, berjalan dalam mode fallback lokal.");
       }
-    } catch(err) {
+    } catch (err) {
       console.error("Firebase initialize error:", err);
     }
 
     // ========================================================
-    // 2. AMBIL PARAMETER URL '?storeId=' & '?cashierId='
+    // 2. EKSTRAKSI ROBUST PARAMETER URL '?storeId=' & '?cashierId='
+    //    Selalu memprioritaskan storeId dari URL (case-sensitive sesuai UID Owner)
     // ========================================================
-    function getQueryParams() {
-      const params = new URLSearchParams(window.location.search);
-      const rawStore = (params.get('storeId') || '').trim().replace(/^["']+|["']+$/g, '');
-      const rawCashier = (params.get('cashierId') || '').trim().replace(/^["']+|["']+$/g, '');
-      const savedStore = (localStorage.getItem('fortapos_storeId') || '').trim();
-      const savedCashier = (localStorage.getItem('fortapos_cashierId') || '').trim();
+    function extractParamsFromCurrentUrl() {
+      let searchParams = new URLSearchParams(window.location.search || '');
 
-      const resolvedStoreId = rawStore || (savedStore && savedStore !== 'toko-utama' ? savedStore : '');
-      const resolvedCashierId = rawCashier || savedCashier || 'owner';
-
-      if (resolvedStoreId) {
-        localStorage.setItem('fortapos_storeId', resolvedStoreId);
+      // Fallback dukung parameter di dalam hash URL (misal: #/?storeId=...)
+      if (!searchParams.get('storeId') && !searchParams.get('storeid') && window.location.hash && window.location.hash.includes('?')) {
+        const hashQuery = window.location.hash.slice(window.location.hash.indexOf('?'));
+        searchParams = new URLSearchParams(hashQuery);
       }
-      localStorage.setItem('fortapos_cashierId', resolvedCashierId);
 
-      return { storeId: resolvedStoreId, cashierId: resolvedCashierId };
+      const rawStore =
+        searchParams.get('storeId') ??
+        searchParams.get('storeid') ??
+        searchParams.get('store_id') ??
+        searchParams.get('tokoId') ??
+        '';
+
+      const rawCashier =
+        searchParams.get('cashierId') ??
+        searchParams.get('cashierid') ??
+        searchParams.get('cashier_id') ??
+        '';
+
+      // Pertahankan huruf besar/kecil asli (UID Firebase Auth bersifat case-sensitive!)
+      const cleanStore = String(rawStore || '').trim().replace(/^\/+|\/+$/g, '');
+      const cleanCashier = String(rawCashier || '').trim();
+
+      return {
+        urlStoreId: cleanStore,
+        urlCashierId: cleanCashier,
+        hasUrlStoreParam: cleanStore.length > 0
+      };
     }
 
-    const initialParams = getQueryParams();
-    let currentStoreId = initialParams.storeId;
-    let currentCashierId = initialParams.cashierId;
+    const initialUrlInfo = extractParamsFromCurrentUrl();
+    const savedStoreIdFromStorage = (localStorage.getItem('fortapos_storeId') || '').trim();
+    const savedCashierIdFromStorage = (localStorage.getItem('fortapos_cashierId') || '').trim();
+
+    // Prioritas mutlak: Parameter URL > LocalStorage > 'toko-utama'
+    let currentStoreId = initialUrlInfo.hasUrlStoreParam
+      ? initialUrlInfo.urlStoreId
+      : (savedStoreIdFromStorage || 'toko-utama');
+
+    // Dokumen ID aktual di koleksi /stores/{resolvedStoreDocId} (default sama dengan currentStoreId)
+    let resolvedStoreDocId = currentStoreId;
+
+    let currentCashierId = initialUrlInfo.urlCashierId
+      ? initialUrlInfo.urlCashierId
+      : (initialUrlInfo.hasUrlStoreParam ? 'owner' : (savedCashierIdFromStorage || 'owner'));
+
+    // Simpan ke localStorage agar tetap konsisten saat halaman di-refresh
+    localStorage.setItem('fortapos_storeId', currentStoreId);
+    localStorage.setItem('fortapos_cashierId', currentCashierId);
+
+    function getActiveStoreDocId() {
+      return (resolvedStoreDocId || currentStoreId || '').trim();
+    }
+
+    // Placeholder SVG ringan & bersih untuk produk tanpa foto (menggantikan URL placehold.co yg rusak)
+    const DEFAULT_PRODUCT_IMAGE_SVG = "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+        <rect width="400" height="400" fill="#f1f5f9"/>
+        <rect x="130" y="120" width="140" height="120" rx="22" fill="#e0e7ff"/>
+        <path d="M165 168L200 148L235 168V208L200 228L165 208V168Z" fill="none" stroke="#4f46e5" stroke-width="10" stroke-linejoin="round"/>
+        <path d="M165 168L200 188L235 168M200 188V228" fill="none" stroke="#4f46e5" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="200" y="278" font-family="sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#64748b"> Ketuk untuk +1 Keranjang </text>
+      </svg>`
+    );
 
     // ========================================================
     // 3. STATE APLIKASI
     // ========================================================
     let currentUser = null; // { name, phone, address, registeredAt }
     let customerAddress = ''; // Alias memori alamat pelanggan
-    let dbProducts = []; // Array data produk master langsung dari Firestore
+    let storeProfileData = {
+      storeName: '',
+      ownerName: '',
+      address: '',
+      phone: ''
+    };
+    let dbProducts = []; // Array data produk master langsung dari Firestore Owner
     let allProducts = dbProducts; // Kompatibilitas alias
     let activeCategory = 'all';
     let searchQuery = '';
     let cart = []; // Array of { id, nama, name, sellPrice, kategori, qty, imageUrl }
     let selectedDelivery = 'antar'; // 'antar' | 'ambil'
     let selectedPayment = 'cash'; // 'cash' | 'transfer'
+    let lastProductClickGuard = { id: '', time: 0 }; // Proteksi anti double-trigger sintetis
 
     // STATE KONFIGURASI ONGKIR & BANK DARI FIRESTORE
     // Path: /stores/{storeId}/config/shipping
     let shippingConfig = {
-      status: true, // boolean: true (ON) atau false (OFF)
-      tarif: 10000, // nilai ongkir dari Firestore jika status ON
-      bankStatus: true, // auto-lock transfer jika false/OFF
+      status: true,
+      tarif: 10000,
+      bankStatus: true,
       isLoaded: false
     };
-    let currentOngkir = 10000; // Biaya antar aktif saat ini
+    let currentOngkir = 10000;
 
     // State View Tab: 'catalog' | 'orders'
     let customerActiveTab = 'catalog';
     let myOrdersList = [];
     let activeOrderFilter = 'all';
-    let queriedPhoneOverride = ''; // Jika pelanggan ingin mengecek nomor WhatsApp lain
+    let queriedPhoneOverride = '';
 
     // State Transfer & 20-Menit Auto-Lock Timer
     let activePendingOrder = null;
@@ -1319,7 +1401,7 @@
     let isCloudinaryUploading = false;
     let pendingCloudinaryUploadPromise = null;
 
-    // Data Rekening Resmi Toko
+    // Data Rekening Resmi Toko (otomatis disinkronkan dari /stores/{storeId}/config/shipping)
     const storeBankInfo = {
       bankName: 'Bank BCA',
       accountNumber: '8830192837',
@@ -1327,22 +1409,146 @@
     };
 
     // Unsubscribe listeners
+    let unsubscribeStoreProfile = null;
     let unsubscribeProducts = null;
+    let unsubscribeFallbackProducts = null;
     let unsubscribeShipping = null;
     let unsubscribeMyOrders = null;
 
     // ========================================================
-    // 4. INISIALISASI DOM
+    // 4. INISIALISASI DOM & SINKRONISASI AWAL
     // ========================================================
+    async function bootstrapStoreRealtimeSync() {
+      const targetId = (currentStoreId || '').trim();
+      resolvedStoreDocId = targetId;
+      storeProfileData = { storeName: '', ownerName: '', address: '', phone: '' };
+
+      updateStoreHeaderAndPathBadges();
+
+      // Resolusi cerdas dokumen toko Owner jika storeId berupa kode kustom / field storeId di koleksi 'stores'
+      if (db && targetId && targetId !== 'toko-utama') {
+        try {
+          const directSnap = await db.collection('stores').doc(targetId).get();
+          if (directSnap.exists) {
+            resolvedStoreDocId = directSnap.id;
+            const d = directSnap.data() || {};
+            storeProfileData = {
+              storeName: d.storeName || d.namaToko || '',
+              ownerName: d.ownerName || '',
+              address: d.address || '',
+              phone: d.phone || ''
+            };
+          } else {
+            // Cek apakah ada dokumen di /stores dengan field storeId == targetId atau uid == targetId
+            const byCodeSnap = await db.collection('stores').where('storeId', '==', targetId).limit(1).get();
+            if (!byCodeSnap.empty) {
+              resolvedStoreDocId = byCodeSnap.docs[0].id;
+              const d = byCodeSnap.docs[0].data() || {};
+              storeProfileData = {
+                storeName: d.storeName || d.namaToko || '',
+                ownerName: d.ownerName || '',
+                address: d.address || '',
+                phone: d.phone || ''
+              };
+            } else {
+              const ownerSnap = await db.collection('owners').doc(targetId).get();
+              if (ownerSnap.exists) {
+                const od = ownerSnap.data() || {};
+                resolvedStoreDocId = (od.storeId || od.uid || targetId).trim();
+                storeProfileData = {
+                  storeName: od.storeName || '',
+                  ownerName: od.ownerName || '',
+                  address: od.address || '',
+                  phone: od.phone || ''
+                };
+              }
+            }
+          }
+        } catch (resolveErr) {
+          // Jika terjadi permission-denied karena rules mewajibkan request.auth != null, coba Anonymous Auth otomatis
+          if (resolveErr && resolveErr.code === 'permission-denied' && auth && !auth.currentUser && !hasAttemptedAnonAuth) {
+            hasAttemptedAnonAuth = true;
+            try {
+              await auth.signInAnonymously();
+              return await bootstrapStoreRealtimeSync();
+            } catch (anonErr) {
+              console.warn("Anonymous auth tidak diaktifkan pada project ini:", anonErr);
+            }
+          } else {
+            console.warn("Info resolusi profil toko:", resolveErr);
+          }
+        }
+      }
+
+      updateStoreHeaderAndPathBadges();
+      initStoreProfileRealtimeListener();
+      initShippingConfigRealtimeListener();
+      initProductCatalogRealtimeListener();
+      initCustomerOrdersListener();
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       lucide.createIcons();
+
+      const cfgProjEl = document.getElementById('cfgFirebaseProjectId');
+      const fbStatusEl = document.getElementById('firebaseStatusText');
+      if (cfgProjEl) cfgProjEl.textContent = firebaseConfig.projectId;
+      if (fbStatusEl) {
+        fbStatusEl.textContent = db
+          ? `Firebase Firestore Real-Time Aktif (${firebaseConfig.projectId})`
+          : `Mode Lokal / Offline (${firebaseConfig.projectId})`;
+      }
+
       updateStoreHeaderAndPathBadges();
       checkCustomerAuthentication();
-      initShippingConfigRealtimeListener(); // Query & sinkronisasi ongkir + bankStatus Firestore
-      initProductCatalogRealtimeListener(); // Katalog produk real-time
       loadCartFromStorage();
       checkExistingPendingTransfer();
+      bootstrapStoreRealtimeSync();
     });
+
+    // Tangani perubahan URL dinamis (back/forward atau hash change)
+    window.addEventListener('popstate', () => {
+      const info = extractParamsFromCurrentUrl();
+      if (info.hasUrlStoreParam && info.urlStoreId !== currentStoreId) {
+        currentStoreId = info.urlStoreId;
+        currentCashierId = info.urlCashierId || 'owner';
+        localStorage.setItem('fortapos_storeId', currentStoreId);
+        localStorage.setItem('fortapos_cashierId', currentCashierId);
+        dbProducts = [];
+        allProducts = [];
+        loadCartFromStorage();
+        bootstrapStoreRealtimeSync();
+      }
+    });
+
+    // LISTENER REAL-TIME PROFIL TOKO OWNER: /stores/{storeId}
+    function initStoreProfileRealtimeListener() {
+      if (unsubscribeStoreProfile) {
+        try { unsubscribeStoreProfile(); } catch (e) {}
+        unsubscribeStoreProfile = null;
+      }
+      const docId = getActiveStoreDocId();
+      if (!db || !docId || docId === 'toko-utama') return;
+
+      try {
+        unsubscribeStoreProfile = db.collection('stores').doc(docId).onSnapshot((docSnap) => {
+          if (docSnap.exists) {
+            const d = docSnap.data() || {};
+            storeProfileData = {
+              storeName: d.storeName || d.namaToko || storeProfileData.storeName || '',
+              ownerName: d.ownerName || storeProfileData.ownerName || '',
+              address: d.address || storeProfileData.address || '',
+              phone: d.phone || storeProfileData.phone || ''
+            };
+            updateStoreHeaderAndPathBadges();
+          }
+        }, (err) => {
+          console.warn("Store profile listener warning:", err);
+        });
+      } catch (e) {
+        console.warn("initStoreProfileRealtimeListener error:", e);
+      }
+    }
 
     // PENYESUAIAN HEADER STRIP DINAMIS
     function updateStoreHeaderAndPathBadges() {
@@ -1358,24 +1564,30 @@
       const ordersPathBadge = document.getElementById('ordersPathBadge');
       const cfgCashierId = document.getElementById('cfgCashierId');
 
+      const activeDocId = getActiveStoreDocId();
+      const displayStoreLabel = (storeProfileData && storeProfileData.storeName)
+        ? storeProfileData.storeName
+        : currentStoreId;
       const isCustomCashier = currentCashierId && currentCashierId.toLowerCase() !== 'owner';
 
       if (isCustomCashier) {
-        if (headerStore) headerStore.textContent = `Kasir: ${currentCashierId}`;
-        if (headerLabel) headerLabel.textContent = 'Petugas:';
+        if (headerStore) headerStore.textContent = storeProfileData.storeName
+          ? `${storeProfileData.storeName} (${currentCashierId})`
+          : `Kasir: ${currentCashierId}`;
+        if (headerLabel) headerLabel.textContent = 'Toko/Kasir:';
       } else {
-        if (headerStore) headerStore.textContent = currentStoreId;
+        if (headerStore) headerStore.textContent = displayStoreLabel;
         if (headerLabel) headerLabel.textContent = 'Toko:';
       }
 
       if (inputModalStoreId) inputModalStoreId.value = currentStoreId;
       if (inputModalCashierId) inputModalCashierId.value = isCustomCashier ? currentCashierId : '';
-      if (cfgPathProducts) cfgPathProducts.textContent = `/stores/${currentStoreId}/products`;
-      if (cfgPathOrders) cfgPathOrders.textContent = `/stores/${currentStoreId}/online_orders`;
-      if (cfgPathShipping) cfgPathShipping.textContent = `/stores/${currentStoreId}/config/shipping`;
-      if (cfgShippingDocPath) cfgShippingDocPath.textContent = `/stores/${currentStoreId}/config/shipping`;
-      if (loadingPathLabel) loadingPathLabel.textContent = `Path: /stores/${currentStoreId}/products`;
-      if (ordersPathBadge) ordersPathBadge.textContent = `/stores/${currentStoreId}/online_orders`;
+      if (cfgPathProducts) cfgPathProducts.textContent = `/stores/${activeDocId}/products`;
+      if (cfgPathOrders) cfgPathOrders.textContent = `/stores/${activeDocId}/online_orders`;
+      if (cfgPathShipping) cfgPathShipping.textContent = `/stores/${activeDocId}/config/shipping`;
+      if (cfgShippingDocPath) cfgShippingDocPath.textContent = `/stores/${activeDocId}/config/shipping`;
+      if (loadingPathLabel) loadingPathLabel.textContent = `Path: /stores/${activeDocId}/products`;
+      if (ordersPathBadge) ordersPathBadge.textContent = `/stores/${activeDocId}/online_orders`;
       if (cfgCashierId) cfgCashierId.textContent = currentCashierId;
     }
 
@@ -1393,24 +1605,38 @@
       if (modal) modal.classList.add('opacity-0', 'pointer-events-none');
     }
 
-    function applyNewStoreId() {
+    async function applyNewStoreId() {
       const inputStore = document.getElementById('inputModalStoreId');
       const inputCashier = document.getElementById('inputModalCashierId');
-      const storeVal = (inputStore?.value || '').trim();
-      const cashierVal = (inputCashier?.value || '').trim();
+      // Jika user menempelkan URL penuh (?storeId=...), ekstrak otomatis nilai storeId-nya!
+      let rawInputVal = (inputStore?.value || '').trim();
+      let cashierVal = (inputCashier?.value || '').trim();
 
-      if (!storeVal) {
+      if (rawInputVal.includes('storeId=')) {
+        try {
+          const qIdx = rawInputVal.indexOf('?');
+          const parsedParams = new URLSearchParams(qIdx >= 0 ? rawInputVal.slice(qIdx) : rawInputVal);
+          if (parsedParams.get('storeId')) rawInputVal = parsedParams.get('storeId').trim();
+          if (!cashierVal && parsedParams.get('cashierId')) cashierVal = parsedParams.get('cashierId').trim();
+        } catch (e) {}
+      }
+
+      if (!rawInputVal) {
         showCustomAlert('Perhatian', 'ID Toko tidak boleh kosong.', 'warning');
         return;
       }
 
-      currentStoreId = storeVal;
+      currentStoreId = rawInputVal;
+      resolvedStoreDocId = rawInputVal;
       currentCashierId = cashierVal ? cashierVal : 'owner';
+      activeCategory = 'all';
+      dbProducts = [];
+      allProducts = [];
 
       localStorage.setItem('fortapos_storeId', currentStoreId);
       localStorage.setItem('fortapos_cashierId', currentCashierId);
-      
-      // Update parameter URL
+
+      // Update parameter URL tanpa reload halaman
       let newUrl = window.location.pathname + '?storeId=' + encodeURIComponent(currentStoreId);
       if (currentCashierId !== 'owner') {
         newUrl += '&cashierId=' + encodeURIComponent(currentCashierId);
@@ -1418,15 +1644,11 @@
       window.history.replaceState({ path: newUrl }, '', newUrl);
 
       closeStoreSwitcherModal();
-      updateStoreHeaderAndPathBadges();
-      
-      // Re-initialize listeners for new store
-      initShippingConfigRealtimeListener();
-      initProductCatalogRealtimeListener();
       loadCartFromStorage();
-      initCustomerOrdersListener();
+      await bootstrapStoreRealtimeSync();
 
-      showCustomAlert('Toko Berhasil Diubah', `Katalog & pesanan sekarang terhubung ke toko: "${currentStoreId}" (${currentCashierId !== 'owner' ? 'Kasir: ' + currentCashierId : 'Owner'})`, 'info');
+      const labelName = storeProfileData.storeName ? `${storeProfileData.storeName} (${currentStoreId})` : currentStoreId;
+      showCustomAlert('Toko Berhasil Terhubung', `Katalog produk sekarang tersinkronisasi real-time dengan toko: "${labelName}"`, 'info');
     }
 
     function copyStoreUrl() {
@@ -1446,18 +1668,20 @@
     }
 
     // ========================================================
-    // SINKRONISASI REAL-TIME ONGKIR & BANK STATUS
+    // SINKRONISASI REAL-TIME ONGKIR, STATUS BANK & REKENING OWNER
     // Path: /stores/{storeId}/config/shipping
     // ========================================================
     function initShippingConfigRealtimeListener() {
       if (unsubscribeShipping) {
-        unsubscribeShipping();
+        try { unsubscribeShipping(); } catch (e) {}
         unsubscribeShipping = null;
       }
 
+      const activeDocId = getActiveStoreDocId();
+
       // Fallback cache lokal jika jaringan terputus sementara
       try {
-        const cached = localStorage.getItem('fortapos_shipping_config_' + currentStoreId);
+        const cached = localStorage.getItem('fortapos_shipping_config_' + activeDocId);
         if (cached) {
           const parsed = JSON.parse(cached);
           shippingConfig = {
@@ -1466,40 +1690,39 @@
             bankStatus: parsed.bankStatus !== undefined ? Boolean(parsed.bankStatus) : true,
             isLoaded: true
           };
+          if (parsed.bankName) storeBankInfo.bankName = parsed.bankName;
+          if (parsed.bankAccount) storeBankInfo.accountNumber = parsed.bankAccount;
+          if (parsed.bankHolder) storeBankInfo.accountHolder = parsed.bankHolder;
           applyShippingCostLogic();
           updateBankPaymentUI();
         }
-      } catch(e) {}
+      } catch (e) {}
 
-      if (!db) {
+      if (!db || !activeDocId) {
         console.warn("Firestore belum siap untuk membaca config/shipping");
         return;
       }
 
       try {
         const shippingDocRef = db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('config')
           .doc('shipping');
 
         unsubscribeShipping = shippingDocRef.onSnapshot((docSnapshot) => {
           if (docSnapshot.exists) {
             const data = docSnapshot.data() || {};
-            
-            // 1. Evaluasi status config ongkir (menerima boolean true, string "true", atau "on")
+
             const isStatusOn = (
-              data.status === true || 
-              String(data.status).toLowerCase() === 'true' || 
+              data.status === true ||
+              String(data.status).toLowerCase() === 'true' ||
               String(data.status).toLowerCase() === 'on' ||
               String(data.status).toLowerCase() === 'active'
             );
 
-            // Menerima field 'tarif' atau sinonim 'shippingCost', 'ongkir', 'cost'
             const rawTarif = data.tarif !== undefined ? data.tarif : (data.shippingCost ?? data.ongkir ?? data.cost ?? 0);
             const parsedTarif = Math.max(0, Number(rawTarif) || 0);
 
-            // 2. AUTO-LOCK FITUR TRANSFER DARI KASIR
-            // Jika field bankStatus bernilai false/OFF, maka pembayaran "Transfer Bank" terkunci
             const isBankDisabled = (
               data.bankStatus === false ||
               String(data.bankStatus).toLowerCase() === 'false' ||
@@ -1509,17 +1732,27 @@
             );
             const bankStatusActive = !isBankDisabled;
 
+            // Sinkronkan detail rekening bank asli milik Owner dari pengaturan Kasir
+            if (data.bankName && String(data.bankName).trim()) {
+              storeBankInfo.bankName = String(data.bankName).trim();
+            }
+            if (data.bankAccount && String(data.bankAccount).trim()) {
+              storeBankInfo.accountNumber = String(data.bankAccount).trim();
+            }
+            if (data.bankHolder && String(data.bankHolder).trim()) {
+              storeBankInfo.accountHolder = String(data.bankHolder).trim();
+            }
+
             shippingConfig = {
               status: isStatusOn,
               tarif: parsedTarif,
               bankStatus: bankStatusActive,
+              bankName: storeBankInfo.bankName,
+              bankAccount: storeBankInfo.accountNumber,
+              bankHolder: storeBankInfo.accountHolder,
               isLoaded: true
             };
-            if (data.bankName) storeBankInfo.bankName = String(data.bankName).trim();
-            if (data.bankAccount) storeBankInfo.accountNumber = String(data.bankAccount).trim();
-            if (data.bankHolder) storeBankInfo.accountHolder = String(data.bankHolder).trim();
           } else {
-            // Jika dokumen belum dibuat di kasir, set default OFF (Gratis Ongkir Rp 0, bank aktif)
             shippingConfig = {
               status: false,
               tarif: 0,
@@ -1528,19 +1761,15 @@
             };
           }
 
-          // Simpan konfigurasi ke cache lokal
-          localStorage.setItem('fortapos_shipping_config_' + currentStoreId, JSON.stringify(shippingConfig));
+          localStorage.setItem('fortapos_shipping_config_' + activeDocId, JSON.stringify(shippingConfig));
 
-          // Terapkan logika biaya antar dan perbarui UI
           applyShippingCostLogic();
           updateShippingUIElements();
           updateBankPaymentUI();
-
         }, (error) => {
-          console.error("Error reading /stores/" + currentStoreId + "/config/shipping:", error);
+          console.error("Error reading /stores/" + activeDocId + "/config/shipping:", error);
         });
-
-      } catch(err) {
+      } catch (err) {
         console.error("Exception in initShippingConfigRealtimeListener:", err);
       }
     }
@@ -1669,9 +1898,10 @@
         showCustomAlert('Firebase Belum Siap', 'Firebase SDK belum terhubung.', 'danger');
         return;
       }
+      const activeDocId = getActiveStoreDocId();
       try {
         await db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('config')
           .doc('shipping')
           .set({
@@ -1682,7 +1912,7 @@
 
         showCustomAlert(
           'Konfigurasi Kasir Berhasil Disimpan',
-          `Data ongkir /stores/${currentStoreId}/config/shipping diubah:\nStatus: ${newStatus ? 'ON' : 'OFF'}\nTarif: ${formatRupiah(newTarif)}`,
+          `Data ongkir /stores/${activeDocId}/config/shipping diubah:\nStatus: ${newStatus ? 'ON' : 'OFF'}\nTarif: ${formatRupiah(newTarif)}`,
           'success'
         );
       } catch(err) {
@@ -1697,9 +1927,10 @@
         showCustomAlert('Firebase Belum Siap', 'Firebase SDK belum terhubung.', 'danger');
         return;
       }
+      const activeDocId = getActiveStoreDocId();
       try {
         await db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('config')
           .doc('shipping')
           .set({
@@ -1729,10 +1960,11 @@
         return;
       }
 
+      const activeDocId = getActiveStoreDocId();
       const latestOrder = myOrdersList[0];
       try {
         await db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('online_orders')
           .doc(latestOrder.orderId)
           .update({
@@ -1850,16 +2082,18 @@
 
     function syncCustomerProfileToFirestore(user) {
       if (!user || !user.phone || !db) return;
+      const activeDocId = getActiveStoreDocId();
+      if (!activeDocId) return;
       try {
         db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('online_customers')
           .doc(user.phone)
           .set({
             name: user.name,
             phone: user.phone,
             address: user.address || '',
-            storeId: currentStoreId,
+            storeId: activeDocId,
             lastActive: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true })
           .catch(err => console.warn("Sync customer profile error:", err));
@@ -1961,14 +2195,114 @@
 
     // ========================================================
     // 7. MEMBACA PRODUK REAL-TIME DARI /stores/{storeId}/products
-    //    MENGGUNAKAN PROPERTI HARGA `sellPrice` & GAMBAR `imageUrl`
+    //    SINKRON LANGSUNG DENGAN DATA KATALOG MILIK OWNER
     // ========================================================
+    function mapFirestoreDocToProduct(doc) {
+      const data = doc.data() || {};
+      const rawPrice = data.sellPrice !== undefined
+        ? data.sellPrice
+        : (data.hargaJual !== undefined ? data.hargaJual : (data.harga ?? data.price ?? 0));
+      const parsedPrice = Number(rawPrice) || 0;
+      const parsedStock = Number(data.stock !== undefined ? data.stock : (data.stok ?? 0)) || 0;
+      const productName = String(data.name || data.nama || data.title || 'Produk Tanpa Nama').trim();
+      const catName = String(data.category || data.kategori || 'Umum').trim() || 'Umum';
+
+      return {
+        id: doc.id,
+        firestoreId: doc.id,
+        barcode: String(data.barcode || ''),
+        nama: productName,
+        name: productName,
+        sellPrice: parsedPrice,
+        hargaJual: parsedPrice,
+        buyPrice: Number(data.buyPrice ?? data.hargaBeli ?? 0) || 0,
+        unit: String(data.unit || data.satuan || 'pcs'),
+        kategori: catName,
+        category: catName,
+        stok: parsedStock,
+        stock: parsedStock,
+        imageUrl: String(data.imageUrl || data.image || data.foto || '').trim(),
+        deskripsi: String(data.description || data.deskripsi || '').trim(),
+        description: String(data.description || data.deskripsi || '').trim(),
+        updatedAt: data.updatedAt || data.createdAt || ''
+      };
+    }
+
+    // Sinkronkan harga & batas stok keranjang belanja jika Owner memperbarui katalog secara real-time
+    function syncCartWithLatestCatalog() {
+      if (!cart || cart.length === 0 || !dbProducts || dbProducts.length === 0) return;
+      let changed = false;
+      const nextCart = [];
+
+      cart.forEach(item => {
+        const master = dbProducts.find(p => p.id === item.id);
+        if (!master) {
+          nextCart.push(item);
+          return;
+        }
+        if (master.stok <= 0) {
+          changed = true;
+          return;
+        }
+        const updatedQty = Math.min(item.qty, master.stok);
+        if (
+          updatedQty !== item.qty ||
+          item.sellPrice !== master.sellPrice ||
+          item.name !== master.name ||
+          item.imageUrl !== master.imageUrl
+        ) {
+          changed = true;
+        }
+        nextCart.push({
+          ...item,
+          nama: master.name,
+          name: master.name,
+          sellPrice: master.sellPrice,
+          buyPrice: master.buyPrice || 0,
+          unit: master.unit || 'pcs',
+          barcode: master.barcode || '',
+          kategori: master.kategori,
+          imageUrl: master.imageUrl || '',
+          qty: updatedQty
+        });
+      });
+
+      if (changed) {
+        cart = nextCart;
+        saveCartToStorage();
+        renderCartDrawer();
+        updateCartBadges();
+      }
+    }
+
+    function updateEmptyCatalogHelperMessage(customReason) {
+      const msgEl = document.getElementById('emptyCatalogMsg');
+      if (!msgEl) return;
+      const activeDocId = getActiveStoreDocId();
+      if (customReason) {
+        msgEl.innerHTML = customReason;
+        return;
+      }
+      if (!activeDocId || activeDocId === 'toko-utama') {
+        msgEl.innerHTML = `Parameter URL <code>?storeId=...</code> belum ditentukan (saat ini: <code>${escapeHtml(activeDocId)}</code>). Silakan buka melalui tautan resmi dari Kasir/Owner atau klik <strong>Toko</strong> di bagian atas untuk memasukkan ID Toko Owner.`;
+      } else if (searchQuery || activeCategory !== 'all') {
+        msgEl.innerHTML = `Tidak ada produk yang cocok dengan filter pencarian/kategori pada toko <code>${escapeHtml(activeDocId)}</code>.`;
+      } else {
+        msgEl.innerHTML = `Katalog pada path Firestore <code>/stores/${escapeHtml(activeDocId)}/products</code> masih kosong. Pastikan Owner telah menambahkan produk pada menu Stok di aplikasi FortaPOS Kasir.`;
+      }
+    }
+
     function initProductCatalogRealtimeListener() {
       if (unsubscribeProducts) {
-        unsubscribeProducts();
+        try { unsubscribeProducts(); } catch (e) {}
         unsubscribeProducts = null;
       }
+      if (unsubscribeFallbackProducts) {
+        try { unsubscribeFallbackProducts(); } catch (e) {}
+        unsubscribeFallbackProducts = null;
+      }
 
+      const activeDocId = getActiveStoreDocId();
       const grid = document.getElementById('productGrid');
       const emptyState = document.getElementById('emptyCatalogState');
       const counter = document.getElementById('productCounter');
@@ -1977,117 +2311,135 @@
         grid.innerHTML = `
           <div class="col-span-full py-16 text-center text-slate-400 flex flex-col items-center justify-center">
             <div class="w-8 h-8 border-3 border-[#4f46e5] border-t-transparent rounded-full animate-spin mb-3"></div>
-            <p class="text-xs font-medium text-slate-700">Membaca produk real-time...</p>
-            <p class="text-[11px] text-slate-400 mt-1 font-mono">/stores/${currentStoreId}/products</p>
+            <p class="text-xs font-medium text-slate-700">Membaca katalog produk real-time...</p>
+            <p class="text-[11px] text-slate-400 mt-1 font-mono">/stores/${escapeHtml(activeDocId)}/products</p>
           </div>
         `;
       }
       if (emptyState) emptyState.classList.add('hidden');
       if (counter) counter.textContent = '(Memuat...)';
 
-      if (!currentStoreId) {
-        if (grid) grid.innerHTML = '';
-        if (counter) counter.textContent = '(ID Toko Belum Dipilih)';
-        if (emptyState) emptyState.classList.remove('hidden');
-        const emptyMsgEl = document.getElementById('emptyCatalogMsg');
-        if (emptyMsgEl) {
-          emptyMsgEl.innerHTML = 'Parameter <code>?storeId=</code> belum terdeteksi di URL. Buka link resmi dari aplikasi Kasir Owner atau pilih Ganti ID Toko di atas.';
-        }
-        return;
-      }
-
-      if (!db) {
-        console.warn("Firestore belum siap, menggunakan cache lokal.");
+      if (!db || !activeDocId) {
+        console.warn("Firestore belum siap, memuat cache lokal.");
         loadLocalFallbackProducts();
         return;
       }
 
       try {
-        const productsCol = db.collection('stores').doc(currentStoreId).collection('products');
-        
-        unsubscribeProducts = productsCol.onSnapshot((snapshot) => {
+        const productsCol = db.collection('stores').doc(activeDocId).collection('products');
+
+        unsubscribeProducts = productsCol.onSnapshot(async (snapshot) => {
           const list = [];
           snapshot.forEach((doc) => {
-            const data = doc.data();
-            const rawPrice = data.sellPrice !== undefined ? data.sellPrice : (data.hargaJual !== undefined ? data.hargaJual : (data.harga ?? data.price ?? 0));
-            const parsedPrice = Number(rawPrice) || 0;
-            const productName = data.name || data.nama || data.title || 'Produk Tanpa Nama';
+            list.push(mapFirestoreDocToProduct(doc));
+          });
 
-            list.push({
-              id: doc.id,
-              nama: productName,
-              name: productName,
-              sellPrice: parsedPrice,
-              hargaJual: parsedPrice,
-              kategori: data.kategori || data.category || 'Umum',
-              category: data.kategori || data.category || 'Umum',
-              stok: Number(data.stok ?? data.stock ?? 0),
-              stock: Number(data.stok ?? data.stock ?? 0),
-              imageUrl: data.imageUrl || data.image || data.foto || '',
-              deskripsi: data.deskripsi || data.description || ''
-            });
+          // Jika subkoleksi /stores/{storeId}/products kosong, cek fallback koleksi root 'products' berdasarkan field storeId
+          if (list.length === 0 && activeDocId !== 'toko-utama') {
+            if (!unsubscribeFallbackProducts) {
+              try {
+                unsubscribeFallbackProducts = db.collection('products')
+                  .where('storeId', '==', activeDocId)
+                  .onSnapshot((rootSnap) => {
+                    if (!rootSnap.empty && dbProducts.length === 0) {
+                      const fallbackList = [];
+                      rootSnap.forEach((rDoc) => fallbackList.push(mapFirestoreDocToProduct(rDoc)));
+                      dbProducts = fallbackList;
+                      allProducts = dbProducts;
+                      saveProductsToCache(dbProducts);
+                      syncCartWithLatestCatalog();
+                      buildDynamicCategories();
+                      renderProducts();
+                    }
+                  }, () => {});
+              } catch (eRoot) {}
+            }
+          } else if (unsubscribeFallbackProducts) {
+            try { unsubscribeFallbackProducts(); } catch (e) {}
+            unsubscribeFallbackProducts = null;
+          }
+
+          // Urutkan agar produk tersedia tampil rapi lebih dulu diikuti urutan nama
+          list.sort((a, b) => {
+            if ((a.stok > 0) !== (b.stok > 0)) return a.stok > 0 ? -1 : 1;
+            return (a.name || '').localeCompare(b.name || '', 'id');
           });
 
           dbProducts = list;
           allProducts = dbProducts;
           saveProductsToCache(dbProducts);
+          syncCartWithLatestCatalog();
+          updateEmptyCatalogHelperMessage();
+
+          if (activeCategory !== 'all' && !dbProducts.some(p => p.kategori === activeCategory || p.category === activeCategory)) {
+            activeCategory = 'all';
+          }
 
           buildDynamicCategories();
           renderProducts();
+        }, async (error) => {
+          console.error("Error reading /stores/" + activeDocId + "/products:", error);
 
-        }, (error) => {
-          console.error("Error reading /stores/" + currentStoreId + "/products:", error);
+          // Jika rules mewajibkan request.auth != null, coba login anonim otomatis 1x lalu pasang ulang listener
+          if (error && error.code === 'permission-denied' && auth && !auth.currentUser && !hasAttemptedAnonAuth) {
+            hasAttemptedAnonAuth = true;
+            try {
+              await auth.signInAnonymously();
+              initStoreProfileRealtimeListener();
+              initShippingConfigRealtimeListener();
+              initProductCatalogRealtimeListener();
+              return;
+            } catch (anonErr) {
+              console.warn("Auto anonymous sign-in gagal:", anonErr);
+            }
+          }
+
+          if (error && error.code === 'permission-denied') {
+            updateEmptyCatalogHelperMessage(
+              `Akses baca ke <code>/stores/${escapeHtml(activeDocId)}/products</code> ditolak oleh Firestore Security Rules (<code>permission-denied</code>). Pastikan aturan Firestore mengizinkan <code>allow read: if true;</code> pada subkoleksi <code>products</code> & <code>config</code>.`
+            );
+          }
           loadLocalFallbackProducts();
         });
 
-      } catch(err) {
+      } catch (err) {
         console.error("Exception in initProductCatalogRealtimeListener:", err);
         loadLocalFallbackProducts();
       }
     }
 
     async function fetchFreshProductsFromFirestore() {
-      if (!db) return;
+      const activeDocId = getActiveStoreDocId();
+      if (!db || !activeDocId) return;
       try {
-        const snap = await db.collection('stores').doc(currentStoreId).collection('products').get();
+        const snap = await db.collection('stores').doc(activeDocId).collection('products').get();
         const freshList = [];
         snap.forEach(doc => {
-          const data = doc.data();
-          const rawPrice = data.sellPrice !== undefined ? data.sellPrice : (data.hargaJual !== undefined ? data.hargaJual : (data.harga ?? data.price ?? 0));
-          const productName = data.name || data.nama || data.title || 'Produk Tanpa Nama';
-
-          freshList.push({
-            id: doc.id,
-            nama: productName,
-            name: productName,
-            sellPrice: Number(rawPrice) || 0,
-            hargaJual: Number(rawPrice) || 0,
-            kategori: data.kategori || data.category || 'Umum',
-            category: data.kategori || data.category || 'Umum',
-            stok: Number(data.stok ?? data.stock ?? 0),
-            stock: Number(data.stok ?? data.stock ?? 0),
-            imageUrl: data.imageUrl || data.image || data.foto || '',
-            deskripsi: data.deskripsi || data.description || ''
-          });
+          freshList.push(mapFirestoreDocToProduct(doc));
+        });
+        freshList.sort((a, b) => {
+          if ((a.stok > 0) !== (b.stok > 0)) return a.stok > 0 ? -1 : 1;
+          return (a.name || '').localeCompare(b.name || '', 'id');
         });
         dbProducts = freshList;
         allProducts = dbProducts;
         saveProductsToCache(dbProducts);
+        syncCartWithLatestCatalog();
         renderProducts();
-      } catch(e) {
+      } catch (e) {
         console.warn("Fetch fresh products error:", e);
       }
     }
 
     function saveProductsToCache(list) {
       try {
-        localStorage.setItem('fortapos_products_cache_' + currentStoreId, JSON.stringify(list));
-      } catch(e) {}
+        localStorage.setItem('fortapos_products_cache_' + getActiveStoreDocId(), JSON.stringify(list));
+      } catch (e) {}
     }
 
     function loadLocalFallbackProducts() {
       try {
-        const raw = localStorage.getItem('fortapos_products_cache_' + currentStoreId);
+        const raw = localStorage.getItem('fortapos_products_cache_' + getActiveStoreDocId());
         if (raw) {
           dbProducts = JSON.parse(raw);
           allProducts = dbProducts;
@@ -2095,7 +2447,7 @@
           dbProducts = [];
           allProducts = dbProducts;
         }
-      } catch(e) {
+      } catch (e) {
         dbProducts = [];
         allProducts = dbProducts;
       }
@@ -2126,7 +2478,8 @@
 
         html += `
           <button 
-            onclick="selectCategory('${escapeHtml(cat)}')" 
+            type="button"
+            onclick="selectCategory(${JSON.stringify(cat).replace(/"/g, '&quot;')})" 
             id="tab-cat-${escapeHtml(cat)}" 
             class="${btnClass}"
           >
@@ -2151,6 +2504,7 @@
         if (searchQuery) clearBtn.classList.remove('hidden');
         else clearBtn.classList.add('hidden');
       }
+      updateEmptyCatalogHelperMessage();
       renderProducts();
     }
 
@@ -2168,11 +2522,40 @@
     }
 
     // ========================================================
-    // RENDER PRODUK KATALOG: IMPLEMENTASI FOTO PRODUK + LAZY LOADING
-    // Ketentuan 1, 2, & 3:
-    // - Frame box div atas merender: <img src="${p.imageUrl || 'https://placehold.co'}" loading="lazy" class="w-full h-full object-cover rounded-t-xl" alt="${p.name}">
-    // - Klik pada area frame foto tetap memicu addToCart('${p.id}')
-    // - Hanya tampilkan pesan limit stok jika stok <= 5 (sembunyikan jika stok melimpah)
+    // HANDLER TUNGGAL KLIK FOTO PRODUK (ANTI DOUBLE-BINDING / ANTI BUBBLING)
+    // Memastikan 1x klik pada foto produk HANYA menambah +1 produk ke keranjang
+    // ========================================================
+    function handleProductPhotoClick(event, productId) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation();
+        }
+      }
+
+      // Guard terhadap synthetic duplicate click event di tick/frame yang sama (< 45ms)
+      const now = Date.now();
+      if (lastProductClickGuard.id === productId && (now - lastProductClickGuard.time) < 45) {
+        return;
+      }
+      lastProductClickGuard = { id: productId, time: now };
+
+      addToCart(productId);
+    }
+
+    function handleDecrementCartClick(event, productId) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      decrementCartItem(productId);
+    }
+
+    // ========================================================
+    // RENDER PRODUK KATALOG: BEBAS DOUBLE-BINDING EVENT CLICK
+    // - Parent card <div> TIDAK lagi memasang onclick="addToCart(...)"
+    // - Hanya elemen foto produk & tombol ikon keranjang yang memicu handleProductPhotoClick() dengan stopPropagation()
     // ========================================================
     function renderProducts() {
       const grid = document.getElementById('productGrid');
@@ -2186,7 +2569,8 @@
         const matchCat = (activeCategory === 'all' || prod.kategori === activeCategory || prod.category === activeCategory);
         const prodName = (prod.name || prod.nama || '').toLowerCase();
         const prodCat = (prod.kategori || prod.category || '').toLowerCase();
-        const matchSearch = (!searchQuery || prodName.includes(searchQuery) || prodCat.includes(searchQuery));
+        const prodBarcode = (prod.barcode || '').toLowerCase();
+        const matchSearch = (!searchQuery || prodName.includes(searchQuery) || prodCat.includes(searchQuery) || prodBarcode.includes(searchQuery));
         return matchCat && matchSearch;
       });
 
@@ -2194,6 +2578,7 @@
 
       if (filtered.length === 0) {
         grid.innerHTML = '';
+        updateEmptyCatalogHelperMessage();
         if (emptyState) emptyState.classList.remove('hidden');
         return;
       }
@@ -2202,19 +2587,19 @@
 
       let html = '';
       filtered.forEach(p => {
+        const safeIdJs = JSON.stringify(String(p.id)).replace(/"/g, '&quot;');
         const inCartItem = cart.find(c => c.id === p.id);
         const currentQty = inCartItem ? inCartItem.qty : 0;
         const isOutOfStock = (p.stok <= 0);
-        // Logika penyembunyian stok melimpah: hanya tampil jika stok <= 5 dan > 0
         const isLowStock = (!isOutOfStock && p.stok <= 5);
         const prodName = p.name || p.nama || 'Produk';
+        const imgSrc = (p.imageUrl && p.imageUrl.trim()) ? escapeHtml(p.imageUrl.trim()) : DEFAULT_PRODUCT_IMAGE_SVG;
 
         html += `
           <div 
-            class="group bg-white rounded-2xl border border-slate-200/90 hover:border-indigo-300 hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col justify-between relative cursor-pointer active:scale-98"
-            onclick="addToCart('${p.id}')"
+            class="group bg-white rounded-2xl border ${currentQty > 0 ? 'border-[#4f46e5] ring-1 ring-indigo-500/20' : 'border-slate-200/90'} hover:border-indigo-300 hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col justify-between relative"
           >
-            <!-- Badge Diskon / Kategori & Limit Stok -->
+            <!-- Badge Kategori & Limit Stok -->
             <div class="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1 pointer-events-none">
               <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/90 backdrop-blur-xs text-slate-700 shadow-2xs border border-slate-100">
                 ${escapeHtml(p.kategori || p.category || 'Umum')}
@@ -2231,17 +2616,26 @@
               ` : ''}
             </div>
 
-            <!-- Area Frame Box Div Atas (Foto Produk dengan Lazy Loading & Klik Frame Aktif) -->
+            ${currentQty > 0 ? `
+              <div class="absolute top-2.5 right-2.5 z-10 pointer-events-none">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#4f46e5] text-white shadow-sm font-mono">
+                  ${currentQty}x
+                </span>
+              </div>
+            ` : ''}
+
+            <!-- Area Frame Foto Produk (Single Click Binding: +1 ke Keranjang) -->
             <div 
-              class="w-full aspect-square bg-slate-100 relative overflow-hidden flex items-center justify-center cursor-pointer"
-              onclick="addToCart('${p.id}')"
+              class="w-full aspect-square bg-slate-100 relative overflow-hidden flex items-center justify-center ${isOutOfStock ? 'cursor-not-allowed opacity-75' : 'cursor-pointer active:scale-98'} select-none"
+              onclick="handleProductPhotoClick(event, ${safeIdJs})"
+              title="${isOutOfStock ? 'Stok habis' : 'Ketuk foto untuk menambah 1 ke keranjang'}"
             >
               <img 
-                src="${p.imageUrl || 'https://placehold.co'}" 
+                src="${imgSrc}" 
                 loading="lazy" 
-                class="w-full h-full object-cover rounded-t-xl group-hover:scale-105 transition-transform duration-300" 
+                class="w-full h-full object-cover rounded-t-xl group-hover:scale-105 transition-transform duration-300 pointer-events-none select-none" 
                 alt="${escapeHtml(prodName)}"
-                onerror="this.onerror=null; this.src='https://placehold.co';"
+                onerror="this.onerror=null; this.src=DEFAULT_PRODUCT_IMAGE_SVG;"
               >
             </div>
 
@@ -2261,15 +2655,15 @@
                   </span>
                 </div>
 
-                <!-- Kontrol Keranjang: Tombol Minus Besar (Tanpa Tombol Plus) -->
-                <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+                <!-- Kontrol Keranjang: Tombol Minus & Tombol Tambah Satu Klik -->
+                <div class="flex items-center gap-1.5">
                   ${currentQty > 0 ? `
                     <button 
                       type="button" 
-                      onclick="decrementCartItem('${p.id}')"
+                      onclick="handleDecrementCartClick(event, ${safeIdJs})"
                       class="w-8 h-8 sm:w-9 sm:h-9 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center font-bold text-base shadow-xs active:scale-95 transition-all cursor-pointer"
-                      title="Kurangi barang"
-                      aria-label="Kurangi barang"
+                      title="Kurangi 1 barang"
+                      aria-label="Kurangi 1 barang"
                     >
                       &minus;
                     </button>
@@ -2278,11 +2672,16 @@
                     </span>
                   ` : ''}
                   
-                  <div 
-                    class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center font-bold transition-all ${isOutOfStock ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : (currentQty > 0 ? 'bg-[#4f46e5] text-white shadow-xs' : 'bg-indigo-50 text-[#4f46e5] group-hover:bg-[#4f46e5] group-hover:text-white')}"
+                  <button
+                    type="button"
+                    onclick="handleProductPhotoClick(event, ${safeIdJs})"
+                    ${isOutOfStock ? 'disabled' : ''}
+                    class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center font-bold transition-all ${isOutOfStock ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : (currentQty > 0 ? 'bg-[#4f46e5] text-white shadow-xs active:scale-95 cursor-pointer' : 'bg-indigo-50 text-[#4f46e5] hover:bg-[#4f46e5] hover:text-white active:scale-95 cursor-pointer')}"
+                    title="${isOutOfStock ? 'Stok habis' : 'Tambah 1 ke keranjang'}"
+                    aria-label="Tambah 1 ke keranjang"
                   >
-                    <i data-lucide="shopping-bag" class="w-4 h-4"></i>
-                  </div>
+                    <i data-lucide="shopping-bag" class="w-4 h-4 pointer-events-none"></i>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2318,9 +2717,12 @@
       } else {
         cart.push({
           id: prod.id,
+          barcode: prod.barcode || '',
           nama: prod.name || prod.nama,
           name: prod.name || prod.nama,
           sellPrice: Number(prod.sellPrice) || 0,
+          buyPrice: Number(prod.buyPrice) || 0,
+          unit: prod.unit || 'pcs',
           kategori: prod.kategori || prod.category || 'Umum',
           imageUrl: prod.imageUrl || '',
           qty: 1
@@ -2685,10 +3087,11 @@
       const orderId = 'ORD-' + Date.now();
       const notes = (document.getElementById('inputOrderNotes')?.value || '').trim();
 
-      // Dokumen pesanan Firestore
+      // Dokumen pesanan Firestore (selaras penuh dengan skema FortaPOS Kasir)
+      const activeDocId = getActiveStoreDocId();
       const orderData = {
         orderId: orderId,
-        storeId: currentStoreId,
+        storeId: activeDocId,
         cashierId: currentCashierId,
         customerName: currentUser.name,
         customerPhone: currentUser.phone,
@@ -2699,10 +3102,14 @@
           const itemName = it.name || it.nama;
           return {
             id: it.id,
+            productId: it.id,
+            barcode: it.barcode || '',
             nama: itemName,
             name: itemName,
             sellPrice: price,
             hargaJual: price,
+            buyPrice: Number(it.buyPrice) || 0,
+            unit: it.unit || 'pcs',
             kategori: it.kategori || 'Umum',
             imageUrl: it.imageUrl || '',
             qty: Number(it.qty),
@@ -2722,6 +3129,7 @@
         deliveryMethod: selectedDelivery, // 'antar' | 'ambil'
         deliveryAddress: selectedDelivery === 'antar' ? deliveryAddress : 'Ambil di Toko',
         paymentMethod: selectedPayment, // 'cash' | 'transfer'
+        bankName: selectedPayment === 'transfer' ? storeBankInfo.bankName : 'Tunai di Kasir',
         status: "Pending", // Status awal "Pending"
         notes: notes,
         paymentProofUrl: "",
@@ -2748,7 +3156,7 @@
           lucide.createIcons();
         }
 
-        // JIKA METODE PEMBAYARAN "TRANSFER": Tampilkan modal upload bukti transfer Base64 & countdown 20 menit
+        // JIKA METODE PEMBAYARAN "TRANSFER": Tampilkan modal upload bukti transfer & countdown 20 menit
         if (selectedPayment === 'transfer') {
           activePendingOrder = orderData;
           localStorage.setItem('fortapos_active_transfer_order', JSON.stringify(orderData));
@@ -2780,14 +3188,15 @@
     }
 
     async function saveOrderToFirestore(order) {
-      if (db) {
+      const activeDocId = getActiveStoreDocId();
+      if (db && activeDocId) {
         await db.collection('stores')
-          .doc(currentStoreId)
+          .doc(activeDocId)
           .collection('online_orders')
           .doc(order.orderId)
           .set(order);
       }
-      const cacheKey = 'fortapos_orders_' + currentStoreId;
+      const cacheKey = 'fortapos_orders_' + activeDocId;
       try {
         const localList = JSON.parse(localStorage.getItem(cacheKey)) || [];
         localList.unshift(order);
@@ -2863,7 +3272,7 @@
         if (db) {
           try {
             await db.collection('stores')
-              .doc(currentStoreId)
+              .doc(getActiveStoreDocId())
               .collection('online_orders')
               .doc(orderId)
               .update({
@@ -2900,7 +3309,7 @@
         if (db) {
           try {
             await db.collection('stores')
-              .doc(currentStoreId)
+              .doc(getActiveStoreDocId())
               .collection('online_orders')
               .doc(orderId)
               .update({
@@ -3092,7 +3501,7 @@
         if (db) {
           // Kirim 'optimizedUrl' (link teks pendek) ke Firestore
           await db.collection('stores')
-            .doc(currentStoreId)
+            .doc(getActiveStoreDocId())
             .collection('online_orders')
             .doc(orderId)
             .update({
@@ -3185,7 +3594,7 @@
 
       try {
         const ordersCol = db.collection('stores')
-          .doc(currentStoreId)
+          .doc(getActiveStoreDocId())
           .collection('online_orders');
 
         unsubscribeMyOrders = ordersCol.onSnapshot((snapshot) => {
@@ -3313,7 +3722,7 @@
                   </span>
                 </div>
                 <p class="text-[11px] text-amber-800">
-                  Transfer ke rekening BCA ${storeBankInfo.accountNumber} dan unggah foto bukti transfer Anda.
+                  Transfer ke rekening ${escapeHtml(storeBankInfo.bankName)} ${escapeHtml(storeBankInfo.accountNumber)} (a/n ${escapeHtml(storeBankInfo.accountHolder)}) dan unggah foto bukti transfer Anda.
                 </p>
                 <div class="flex items-center gap-2 flex-wrap pt-1">
                   <button onclick="openTransferModalForOrder('${order.orderId}')" class="px-3 py-1.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer">
@@ -3753,7 +4162,7 @@
       if (db) {
         try {
           await db.collection('stores')
-            .doc(currentStoreId)
+            .doc(getActiveStoreDocId())
             .collection('online_orders')
             .doc(orderId)
             .update({
@@ -3775,7 +4184,7 @@
       if (!order) return;
 
       const dateStr = order.timestamp ? new Date(order.timestamp).toLocaleString('id-ID') : new Date().toLocaleString('id-ID');
-      const storeName = currentStoreId.toUpperCase();
+      const storeName = (storeProfileData.storeName || currentStoreId).toUpperCase();
       const cashierName = order.cashierId || 'OWNER';
       const custName = order.customerName || 'Pelanggan';
       const custPhone = order.customerPhone || '-';
@@ -3785,8 +4194,8 @@
 
       let text = '';
       text += `================================\n`;
-      text += `       FORTAPOS ONLINE STORE    \n`;
-      text += `       ID: ${storeName}         \n`;
+      text += `       ${storeName}             \n`;
+      text += `       ID: ${currentStoreId}    \n`;
       text += `================================\n`;
       text += `No. Order : ${order.orderId}\n`;
       text += `Tanggal   : ${dateStr}\n`;
