@@ -1360,7 +1360,9 @@
       storeName: '',
       ownerName: '',
       address: '',
-      phone: ''
+      phone: '',
+      no_whatsapp_owner: '',
+      whatsapp: ''
     };
     let dbProducts = []; // Array data produk master langsung dari Firestore Owner
     let allProducts = dbProducts; // Kompatibilitas alias
@@ -1421,7 +1423,7 @@
     async function bootstrapStoreRealtimeSync() {
       const targetId = (currentStoreId || '').trim();
       resolvedStoreDocId = targetId;
-      storeProfileData = { storeName: '', ownerName: '', address: '', phone: '' };
+      storeProfileData = { storeName: '', ownerName: '', address: '', phone: '', no_whatsapp_owner: '', whatsapp: '' };
 
       updateStoreHeaderAndPathBadges();
 
@@ -3054,6 +3056,185 @@
     // 9. SIMPAN PESANAN BARU KE: /stores/{storeId}/online_orders
     //    MENGGUNAKAN ALAMAT DARI POP-UP AWAL & LOGIKA CASH vs TRANSFER
     // ========================================================
+    // ========================================================
+    // LOGIKA WHATSAPP OTOMATIS TERSEMBUNYI (PROTEKSI PRIVASI)
+    // Nomor WhatsApp sama sekali DILARANG ditampilkan pada teks tombol,
+    // data-attribute HTML, maupun URL address bar. Diproses murni di runtime memory.
+    // ========================================================
+    function formatWhatsAppNumber(phone) {
+      if (!phone) return '';
+      let clean = String(phone).replace(/\D/g, '');
+      if (clean.startsWith('0')) {
+        clean = '62' + clean.slice(1);
+      } else if (clean.startsWith('8')) {
+        clean = '628' + clean.slice(1);
+      } else if (!clean.startsWith('62') && clean.length > 0) {
+        clean = '62' + clean;
+      }
+      return clean;
+    }
+
+    async function getEmployeeWhatsApp(activeDocId, cashierId) {
+      if (!db || !activeDocId || !cashierId) return '';
+      const cleanId = String(cashierId).trim();
+      if (!cleanId || cleanId.toLowerCase() === 'owner') return '';
+
+      const subcollections = ['employees', 'karyawan', 'cashiers', 'staff'];
+      // 1. Cek langsung dengan doc(cleanId)
+      for (const sub of subcollections) {
+        try {
+          const snap = await db.collection('stores').doc(activeDocId).collection(sub).doc(cleanId).get();
+          if (snap.exists) {
+            const d = snap.data() || {};
+            const p = d.whatsapp || d.no_whatsapp || d.noWhatsapp || d.phone || d.telepon || d.hp || d.noHp || d.nomorHp;
+            if (p) return formatWhatsAppNumber(p);
+          }
+        } catch (e) {}
+      }
+
+      // 2. Cek query berdasarkan field (employeeId, cashierId, id, nik)
+      const idFields = ['employeeId', 'cashierId', 'id', 'idKaryawan', 'code', 'nik', 'username'];
+      for (const sub of subcollections) {
+        for (const field of idFields) {
+          try {
+            const qSnap = await db.collection('stores').doc(activeDocId).collection(sub).where(field, '==', cleanId).limit(1).get();
+            if (!qSnap.empty) {
+              const d = qSnap.docs[0].data() || {};
+              const p = d.whatsapp || d.no_whatsapp || d.noWhatsapp || d.phone || d.telepon || d.hp || d.noHp || d.nomorHp;
+              if (p) return formatWhatsAppNumber(p);
+            }
+          } catch (e) {}
+        }
+      }
+
+      // 3. Fallback jika ada koleksi root employees / karyawan
+      for (const rootCol of ['employees', 'karyawan']) {
+        try {
+          const snap = await db.collection(rootCol).doc(cleanId).get();
+          if (snap.exists) {
+            const d = snap.data() || {};
+            const p = d.whatsapp || d.no_whatsapp || d.noWhatsapp || d.phone || d.telepon || d.hp || d.noHp;
+            if (p) return formatWhatsAppNumber(p);
+          }
+        } catch (e) {}
+      }
+
+      return '';
+    }
+
+    async function getOwnerWhatsApp(activeDocId) {
+      if (!db || !activeDocId) return '';
+
+      // 1. Cek /stores/{activeDocId}
+      try {
+        const storeSnap = await db.collection('stores').doc(activeDocId).get();
+        if (storeSnap.exists) {
+          const d = storeSnap.data() || {};
+          const p = d.no_whatsapp_owner || d.whatsappOwner || d.no_whatsapp || d.whatsapp || d.phone || d.noHp || d.telepon || d.ownerPhone;
+          if (p) return formatWhatsAppNumber(p);
+        }
+      } catch (e) {}
+
+      // 2. Cek /owners/{activeDocId}
+      try {
+        const ownerSnap = await db.collection('owners').doc(activeDocId).get();
+        if (ownerSnap.exists) {
+          const d = ownerSnap.data() || {};
+          const p = d.no_whatsapp_owner || d.whatsappOwner || d.no_whatsapp || d.whatsapp || d.phone || d.noHp || d.telepon;
+          if (p) return formatWhatsAppNumber(p);
+        }
+      } catch (e) {}
+
+      // 3. Cek /stores/{activeDocId}/config/shipping
+      try {
+        const shipSnap = await db.collection('stores').doc(activeDocId).collection('config').doc('shipping').get();
+        if (shipSnap.exists) {
+          const d = shipSnap.data() || {};
+          const p = d.no_whatsapp_owner || d.whatsappOwner || d.no_whatsapp || d.whatsapp || d.phone;
+          if (p) return formatWhatsAppNumber(p);
+        }
+      } catch (e) {}
+
+      // 4. Cek /stores/{activeDocId}/config/profile
+      try {
+        const profSnap = await db.collection('stores').doc(activeDocId).collection('config').doc('profile').get();
+        if (profSnap.exists) {
+          const d = profSnap.data() || {};
+          const p = d.no_whatsapp_owner || d.whatsappOwner || d.no_whatsapp || d.whatsapp || d.phone;
+          if (p) return formatWhatsAppNumber(p);
+        }
+      } catch (e) {}
+
+      // 5. Fallback ke state storeProfileData
+      if (storeProfileData) {
+        const p = storeProfileData.no_whatsapp_owner || storeProfileData.whatsapp || storeProfileData.phone;
+        if (p) return formatWhatsAppNumber(p);
+      }
+
+      return '';
+    }
+
+    async function resolveOrderWhatsAppDestination() {
+      const activeDocId = getActiveStoreDocId();
+      const cleanCashier = (currentCashierId || '').trim();
+      const hasCashierParam = cleanCashier && cleanCashier.toLowerCase() !== 'owner';
+
+      let targetPhone = '';
+
+      if (hasCashierParam) {
+        // Link disebar oleh Karyawan (ada cashierId di URL)
+        targetPhone = await getEmployeeWhatsApp(activeDocId, cleanCashier);
+        if (!targetPhone) {
+          // Fallback ke nomor WhatsApp Owner jika nomor karyawan belum diatur
+          targetPhone = await getOwnerWhatsApp(activeDocId);
+        }
+      } else {
+        // Link disebar oleh Owner (tidak ada cashierId di URL)
+        targetPhone = await getOwnerWhatsApp(activeDocId);
+      }
+
+      return targetPhone;
+    }
+
+    function generateWhatsAppOrderMessage(order) {
+      const isCash = (order.paymentMethod === 'cash' || !order.paymentMethod);
+      const paymentLabel = isCash ? 'Cash / Tunai' : `Transfer Bank (${order.bankName || 'BCA'})`;
+      const deliveryLabel = order.deliveryMethod === 'antar' ? 'Belanja Diantar' : 'Ambil di Toko';
+      const orderOngkir = Number(order.ongkir || 0);
+      const dateStr = new Date().toLocaleString('id-ID', {
+        day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+
+      let text = '*PESANAN BARU - FORTAPOS ONLINE*\n';
+      text += '================================\n';
+      text += `*ID Pesanan:* ${order.orderId}\n`;
+      text += `*Tanggal:* ${dateStr}\n`;
+      text += `*Nama Pelanggan:* ${order.customerName}\n`;
+      text += `*No. WhatsApp:* ${order.customerPhone}\n`;
+      text += `*Metode Pengiriman:* ${deliveryLabel}\n`;
+      if (order.deliveryMethod === 'antar' && (order.customerAddress || order.deliveryAddress)) {
+        text += `*Alamat Pengiriman:* ${order.customerAddress || order.deliveryAddress}\n`;
+      }
+      text += `*Metode Pembayaran:* ${paymentLabel}\n`;
+      if (order.notes) {
+        text += `*Catatan:* ${order.notes}\n`;
+      }
+      text += '--------------------------------\n';
+      text += '*RINCIAN BARANG BELANJA:*\n';
+      (order.items || []).forEach(it => {
+        const itemPrice = Number(it.sellPrice !== undefined ? it.sellPrice : (it.hargaJual || 0));
+        text += `• ${it.qty}x ${it.name || it.nama} (@ ${formatRupiah(itemPrice)}) = ${formatRupiah(itemPrice * it.qty)}\n`;
+      });
+      text += '--------------------------------\n';
+      text += `*Subtotal Produk:* ${formatRupiah(order.subtotal)}\n`;
+      text += `*Ongkos Kirim:* ${orderOngkir === 0 ? 'Gratis' : formatRupiah(orderOngkir)}\n`;
+      text += `*TOTAL PEMBAYARAN:* ${formatRupiah(order.grandTotal || order.totalBill)}\n`;
+      text += '================================\n';
+      text += 'Halo kak, saya baru saja membuat pesanan online di atas melalui FortaPOS. Mohon segera dicek dan diproses ya. Terima kasih! 🙏';
+
+      return text;
+    }
+
     async function handleCheckoutSubmit() {
       if (!currentUser || !currentUser.address) {
         showRegistrationModal(true);
@@ -3141,7 +3322,40 @@
         // 1. Simpan dokumen pesanan baru ke Firestore
         await saveOrderToFirestore(orderData);
 
-        // 2. Bersihkan keranjang belanja
+        // 2. AMBIL NOMOR WHATSAPP TUJUAN SECARA TERSEMBUNYI (PROTEKSI PRIVASI)
+        // Conditional Check:
+        // - Jika ada parameter 'cashierId' (Link disebar oleh Karyawan) -> fetch data ke Firestore dokumen karyawan untuk ambil field 'whatsapp'
+        // - Jika tidak ada parameter 'cashierId' (Link disebar oleh Owner) -> fetch data ke Firestore profil toko untuk ambil 'no_whatsapp_owner'
+        let targetWaPhone = '';
+        try {
+          targetWaPhone = await resolveOrderWhatsAppDestination();
+        } catch (fetchWaErr) {
+          console.warn("[FortaPOS] Gagal mengambil nomor tujuan WhatsApp:", fetchWaErr);
+        }
+
+        // 3. SUSUN TEKS PESAN OTOMATIS (URL ENCODED) SECARA RAPI
+        const waMessageText = generateWhatsAppOrderMessage(orderData);
+        const encodedWaMessage = encodeURIComponent(waMessageText);
+
+        // 4. SUSUN TAUTAN LINK API WHATSAPP RESMI
+        let waUrl = '';
+        if (targetWaPhone) {
+          waUrl = `https://api.whatsapp.com/send?phone=${targetWaPhone}&text=${encodedWaMessage}`;
+        } else {
+          waUrl = `https://api.whatsapp.com/send?text=${encodedWaMessage}`;
+        }
+
+        // 5. SECARA OTOMATIS ARAHKAN BROWSER PELANGGAN KE API WHATSAPP RESMI (window.open dengan fallback window.location.href)
+        try {
+          const openedWindow = window.open(waUrl, '_blank');
+          if (!openedWindow || openedWindow.closed || typeof openedWindow.closed === 'undefined') {
+            window.location.href = waUrl;
+          }
+        } catch (eOpen) {
+          window.location.href = waUrl;
+        }
+
+        // 6. Bersihkan keranjang belanja
         cart = [];
         saveCartToStorage();
         updateCartBadges();
@@ -3172,7 +3386,7 @@
 
         showCustomAlert(
           'Pesanan Berhasil Dibuat!',
-          `Pesanan Anda (${orderId}) dengan metode pembayaran Cash/Tunai telah berhasil disimpan ke sistem toko. Pantau status pelacakan pesanan Anda secara real-time pada tab Pesanan Saya ini.`,
+          `Pesanan Anda (${orderId}) telah berhasil disimpan ke sistem toko dan tautan konfirmasi WhatsApp resmi telah dibuka. Pantau status pelacakan pesanan Anda secara real-time pada tab Pesanan Saya ini.`,
           'success'
         );
 
