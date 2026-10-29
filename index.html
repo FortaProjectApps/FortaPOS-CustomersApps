@@ -203,6 +203,31 @@
   </style>
 </head>
 <body class="min-h-screen flex flex-col font-sans bg-[#f8f9fa] text-slate-800">
+  <!-- TOP NAVIGATION APP SWITCHER (KASIR / PELANGGAN / ADMIN) -->
+  <div class="bg-slate-900 text-white border-b border-slate-800 py-1.5 px-4 text-xs no-print select-none">
+    <div class="max-w-4xl mx-auto flex items-center justify-between flex-wrap gap-2">
+      <div class="flex items-center space-x-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-extrabold text-[11px] tracking-wide text-emerald-400 font-mono">FortaPOS-Online</span>
+        <span class="text-[10px] text-slate-400 font-mono hidden sm:inline">| OSV1.0.0.V8</span>
+      </div>
+      <div class="flex items-center space-x-1.5 text-[11px]">
+        <a href="/" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition flex items-center gap-1 border border-slate-700" title="Buka Aplikasi Kasir">
+          <i data-lucide="store" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>Kasir POS</span>
+        </a>
+        <a href="/FortaPOS Pelanggan.html" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-bold transition flex items-center gap-1 shadow-xs" title="Halaman Pelanggan Online">
+          <i data-lucide="shopping-bag" class="w-3.5 h-3.5"></i>
+          <span>Pelanggan Online</span>
+        </a>
+        <a href="/fortapos-admin.html" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition flex items-center gap-1 border border-slate-700" title="SaaS Developer Admin Panel">
+          <i data-lucide="shield-check" class="w-3.5 h-3.5 text-amber-400"></i>
+          <span>Admin Panel</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
 
   <!-- TOP APP BAR -->
   <header class="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs">
@@ -255,6 +280,17 @@
       </div>
     </div>
   </header>
+
+  <!-- BANNER NOTIFIKASI TOKO DINONAKTIFKAN SEMENTARA -->
+  <div id="storeSuspendedBanner" class="hidden bg-rose-600 text-white text-xs font-bold px-4 py-2.5 shadow-md z-40 transition-all">
+    <div class="max-w-4xl mx-auto flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-300 shrink-0"></i>
+        <span>PEMBERITAHUAN: Toko Ini Sedang Dinonaktifkan Sementara oleh Pengembang. Pemesanan belum dapat diproses.</span>
+      </div>
+      <span class="text-[10px] bg-rose-900/60 px-2 py-0.5 rounded font-mono">SUSPENDED</span>
+    </div>
+  </div>
 
   <!-- STORE ANNOUNCEMENT / STATUS BAR WITH DYNAMIC SHIPPING INDICATOR -->
   <div id="storeBanner" class="bg-indigo-50/80 border-b border-indigo-100 text-xs text-indigo-900 px-4 py-2">
@@ -1536,13 +1572,26 @@
         unsubscribeStoreProfile = db.collection('stores').doc(docId).onSnapshot((docSnap) => {
           if (docSnap.exists) {
             const d = docSnap.data() || {};
+            const accStatus = String(d.accountStatus || d.status_akun || 'active').toLowerCase().trim();
+            window._isStoreSuspended = (accStatus === 'disabled' || accStatus === 'suspended');
+
             storeProfileData = {
               storeName: d.storeName || d.namaToko || storeProfileData.storeName || '',
               ownerName: d.ownerName || storeProfileData.ownerName || '',
               address: d.address || storeProfileData.address || '',
-              phone: d.phone || storeProfileData.phone || ''
+              phone: d.phone || storeProfileData.phone || '',
+              accountStatus: accStatus
             };
             updateStoreHeaderAndPathBadges();
+
+            const suspendedBanner = document.getElementById('storeSuspendedBanner');
+            if (suspendedBanner) {
+              if (window._isStoreSuspended) {
+                suspendedBanner.classList.remove('hidden');
+              } else {
+                suspendedBanner.classList.add('hidden');
+              }
+            }
           }
         }, (err) => {
           console.warn("Store profile listener warning:", err);
@@ -3236,6 +3285,15 @@
     }
 
     async function handleCheckoutSubmit() {
+      if (window._isStoreSuspended) {
+        showCustomAlert(
+          'Toko Dinonaktifkan',
+          'Toko ini sedang dinonaktifkan sementara oleh pengembang. Pemesanan belum dapat diproses saat ini. Silakan hubungi penjual.',
+          'danger'
+        );
+        return;
+      }
+
       if (!currentUser || !currentUser.address) {
         showRegistrationModal(true);
         showCustomAlert('Lengkapi Profil', 'Mohon lengkapi nama, nomor WhatsApp, dan Alamat Lengkap Pengiriman Anda terlebih dahulu.', 'warning');
